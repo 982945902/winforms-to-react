@@ -2,6 +2,7 @@ import type {
   ControlCoverage,
   ControlSupportStatus,
   EventStub,
+  FormReportSummary,
   FormSupportSummary,
   MigrationReport,
   ParseResult,
@@ -212,17 +213,27 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
     }
   }
 
-  const report: MigrationReport = {
-    sourceFiles: [options.sourcePath],
-    formsConverted: 1,
+  const controlCoverage = buildControlCoverage(controlCounts);
+  form.support = {
     controlsConverted: controls.size,
     supportedControls: [...supportedControls].sort(),
     degradedControls: [...degradedControls].sort(),
     unknownControls: [...unknownControls].sort(),
-    controlCoverage: buildControlCoverage(controlCounts),
+    controlCoverage,
     eventStubs
   };
-  form.support = formSupportFromReport(report);
+
+  const report: MigrationReport = {
+    sourceFiles: [options.sourcePath],
+    forms: [formReportFromForm(form)],
+    formsConverted: 1,
+    controlsConverted: controls.size,
+    supportedControls: form.support.supportedControls,
+    degradedControls: form.support.degradedControls,
+    unknownControls: form.support.unknownControls,
+    controlCoverage,
+    eventStubs
+  };
 
   return {
     form: stripInternalForm(form),
@@ -231,14 +242,12 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
   };
 }
 
-function formSupportFromReport(report: MigrationReport): FormSupportSummary {
+function formReportFromForm(form: VisualForm): FormReportSummary {
   return {
-    controlsConverted: report.controlsConverted,
-    supportedControls: report.supportedControls,
-    degradedControls: report.degradedControls,
-    unknownControls: report.unknownControls,
-    controlCoverage: report.controlCoverage,
-    eventStubs: report.eventStubs
+    name: form.name,
+    title: form.text,
+    sourcePath: form.sourcePath,
+    support: form.support
   };
 }
 

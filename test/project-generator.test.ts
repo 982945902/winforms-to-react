@@ -52,6 +52,14 @@ describe("generateReactProject", () => {
         forms: [form],
         report: {
           sourceFiles: ["SampleForm.Designer.cs"],
+          forms: [
+            {
+              name: "SampleForm",
+              title: "Sample",
+              sourcePath: "src/SampleForm.Designer.cs",
+              support: form.support
+            }
+          ],
           formsConverted: 1,
           controlsConverted: 1,
           supportedControls: ["Button"],
@@ -135,6 +143,20 @@ describe("generateReactProject", () => {
         forms: [form, { ...form }],
         report: {
           sourceFiles: ["A/Form1.Designer.cs", "B/Form1.Designer.cs"],
+          forms: [
+            {
+              name: "Form1",
+              title: "Form",
+              sourcePath: "A/Form1.Designer.cs",
+              support: form.support
+            },
+            {
+              name: "Form1",
+              title: "Form",
+              sourcePath: "B/Form1.Designer.cs",
+              support: form.support
+            }
+          ],
           formsConverted: 2,
           controlsConverted: 0,
           supportedControls: [],

@@ -161,6 +161,14 @@ describe("parseDesignerSource", () => {
       controlCoverage: result.report.controlCoverage,
       eventStubs: [{ controlName: "btnSave", event: "Click", handler: "btnSave_Click" }]
     });
+    expect(result.report.forms).toEqual([
+      {
+        name: "OrderForm",
+        title: "Order Entry",
+        sourcePath: "OrderForm.Designer.cs",
+        support: result.form.support
+      }
+    ]);
     expect(serialized).not.toContain("typeName");
   });
 });

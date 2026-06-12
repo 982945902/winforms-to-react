@@ -56,6 +56,7 @@ function mergeReports(reports: MigrationReport[]): MigrationReport {
   const unknownControls = new Set<string>();
   return {
     sourceFiles: reports.flatMap((report) => report.sourceFiles),
+    forms: reports.flatMap((report) => report.forms),
     formsConverted: reports.reduce((total, report) => total + report.formsConverted, 0),
     controlsConverted: reports.reduce((total, report) => total + report.controlsConverted, 0),
     supportedControls: mergeSet(reports, "supportedControls", supportedControls),

@@ -72,6 +72,13 @@ export type FormSupportSummary = {
   eventStubs: EventStub[];
 };
 
+export type FormReportSummary = {
+  name: string;
+  title?: string;
+  sourcePath: string;
+  support: FormSupportSummary;
+};
+
 export type VisualForm = {
   kind: "Form";
   name: string;
@@ -86,6 +93,7 @@ export type VisualForm = {
 
 export type MigrationReport = {
   sourceFiles: string[];
+  forms: FormReportSummary[];
   formsConverted: number;
   controlsConverted: number;
   supportedControls: string[];
