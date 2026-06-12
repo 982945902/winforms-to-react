@@ -148,25 +148,70 @@ function allocateFormFiles(forms: VisualForm[]): GeneratedFormFile[] {
 
 function appTsx(forms: GeneratedFormFile[]) {
   const imports = forms.map((item) => `import ${item.importName} from "../forms/${item.fileName}";`).join("\n");
-  const formItems = forms.map((item) => `{ name: ${JSON.stringify(item.form.name)}, form: ${item.importName} }`).join(",\n  ");
-  return `${imports}
+  const formItems = forms
+    .map((item, index) => `{ id: "form-${index}", name: ${JSON.stringify(item.form.name)}, title: ${JSON.stringify(item.form.text ?? item.form.name)}, fileName: ${JSON.stringify(item.fileName)}, form: ${item.importName} }`)
+    .join(",\n  ");
+  return `import { useState } from "react";
+${imports}
+import report from "../migration-report.json";
 import { WinFormHost } from "./winformsCompat";
 
-const forms = [
+type PreviewForm = {
+  id: string;
+  name: string;
+  title: string;
+  fileName: string;
+  form: unknown;
+};
+
+const forms: PreviewForm[] = [
   ${formItems}
 ];
 
 export default function App() {
+  const [selectedFormId, setSelectedFormId] = useState(forms[0]?.id ?? "");
+  const selectedForm = forms.find((item) => item.id === selectedFormId) ?? forms[0];
+  const coverage = report.controlCoverage;
+
   return (
     <main className="preview-shell">
       <aside className="preview-sidebar">
         <h1>WinForms React Preview</h1>
         <p>{forms.length} form{forms.length === 1 ? "" : "s"} converted</p>
+        <div className="preview-stats" aria-label="Migration coverage">
+          <div className="preview-stat">
+            <span>Controls</span>
+            <strong>{coverage.total}</strong>
+          </div>
+          <div className="preview-stat">
+            <span>Supported</span>
+            <strong>{coverage.supportedPercent}%</strong>
+          </div>
+          <div className="preview-stat">
+            <span>Previewable</span>
+            <strong>{coverage.previewablePercent}%</strong>
+          </div>
+          <div className="preview-stat">
+            <span>Unknown</span>
+            <strong>{coverage.unknown}</strong>
+          </div>
+        </div>
+        <nav className="preview-form-list" aria-label="Converted forms">
+          {forms.map((item) => (
+            <button
+              key={item.id}
+              className={item.id === selectedForm?.id ? "active" : ""}
+              type="button"
+              onClick={() => setSelectedFormId(item.id)}
+            >
+              <span>{item.title}</span>
+              <small>{item.fileName}</small>
+            </button>
+          ))}
+        </nav>
       </aside>
       <section className="preview-forms">
-        {forms.map((item) => (
-          <WinFormHost key={item.name} form={item.form as any} />
-        ))}
+        {selectedForm ? <WinFormHost key={selectedForm.id} form={selectedForm.form as any} /> : null}
       </section>
     </main>
   );
@@ -354,7 +399,7 @@ body {
 
 .preview-shell {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 320px 1fr;
   min-height: 100vh;
 }
 
@@ -362,6 +407,8 @@ body {
   padding: 24px;
   border-right: 1px solid #c7c7c7;
   background: #f7f7f7;
+  max-height: 100vh;
+  overflow: auto;
 }
 
 .preview-sidebar h1 {
@@ -372,6 +419,73 @@ body {
 .preview-sidebar p {
   margin: 0;
   color: #555;
+}
+
+.preview-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 18px 0;
+}
+
+.preview-stat {
+  border: 1px solid #d0d0d0;
+  background: #fff;
+  padding: 8px;
+}
+
+.preview-stat span {
+  display: block;
+  color: #666;
+  font-size: 11px;
+}
+
+.preview-stat strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.preview-form-list {
+  display: grid;
+  gap: 4px;
+}
+
+.preview-form-list button {
+  display: block;
+  width: 100%;
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 7px 8px;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.preview-form-list button:hover,
+.preview-form-list button.active {
+  border-color: #9bb7da;
+  background: #e6f0ff;
+}
+
+.preview-form-list span,
+.preview-form-list small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview-form-list span {
+  font-size: 12px;
+}
+
+.preview-form-list small {
+  margin-top: 2px;
+  color: #666;
+  font-size: 11px;
 }
 
 .preview-forms {

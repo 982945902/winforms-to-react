@@ -59,6 +59,11 @@ describe("generateReactProject", () => {
       const report = JSON.parse(await readFile(join(outDir, "migration-report.json"), "utf8"));
 
       expect(app).toContain("WinFormHost");
+      expect(app).toContain("import { useState } from \"react\";");
+      expect(app).toContain("import report from \"../migration-report.json\";");
+      expect(app).toContain("selectedForm");
+      expect(app).toContain("preview-form-list");
+      expect(app).toContain("preview-stat");
       expect(packageJson.devDependencies["@types/react"]).toBeDefined();
       expect(packageJson.devDependencies["@types/react-dom"]).toBeDefined();
       expect(formJson.name).toBe("SampleForm");
@@ -110,6 +115,8 @@ describe("generateReactProject", () => {
 
       expect(app).toContain("form0");
       expect(app).toContain("form1");
+      expect(app).toContain("id: \"form-0\"");
+      expect(app).toContain("id: \"form-1\"");
       expect(first.name).toBe("Form1");
       expect(second.name).toBe("Form1");
     } finally {
