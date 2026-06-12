@@ -38,17 +38,6 @@ export type VisualControl = {
   children: VisualControl[];
 };
 
-export type VisualForm = {
-  kind: "Form";
-  name: string;
-  sourcePath: string;
-  text?: string;
-  clientSize?: VisualSize;
-  autoScaleDimensions?: VisualSize;
-  controls: VisualControl[];
-  properties: Record<string, unknown>;
-};
-
 export type EventStub = {
   controlName: string;
   event: string;
@@ -72,6 +61,27 @@ export type ControlCoverage = {
   previewablePercent: number;
   unknownPercent: number;
   byKind: ControlCoverageByKind[];
+};
+
+export type FormSupportSummary = {
+  controlsConverted: number;
+  supportedControls: string[];
+  degradedControls: string[];
+  unknownControls: string[];
+  controlCoverage: ControlCoverage;
+  eventStubs: EventStub[];
+};
+
+export type VisualForm = {
+  kind: "Form";
+  name: string;
+  sourcePath: string;
+  support: FormSupportSummary;
+  text?: string;
+  clientSize?: VisualSize;
+  autoScaleDimensions?: VisualSize;
+  controls: VisualControl[];
+  properties: Record<string, unknown>;
 };
 
 export type MigrationReport = {

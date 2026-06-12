@@ -2,6 +2,7 @@ import type {
   ControlCoverage,
   ControlSupportStatus,
   EventStub,
+  FormSupportSummary,
   MigrationReport,
   ParseResult,
   VisualBounds,
@@ -171,6 +172,7 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
     kind: "Form",
     name: className,
     sourcePath: options.sourcePath,
+    support: emptyFormSupport(),
     controls: [],
     properties: {}
   };
@@ -220,11 +222,43 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
     controlCoverage: buildControlCoverage(controlCounts),
     eventStubs
   };
+  form.support = formSupportFromReport(report);
 
   return {
     form: stripInternalForm(form),
     controlsByName: new Map([...controls.entries()].map(([name, control]) => [name, stripInternalControl(control)])),
     report
+  };
+}
+
+function formSupportFromReport(report: MigrationReport): FormSupportSummary {
+  return {
+    controlsConverted: report.controlsConverted,
+    supportedControls: report.supportedControls,
+    degradedControls: report.degradedControls,
+    unknownControls: report.unknownControls,
+    controlCoverage: report.controlCoverage,
+    eventStubs: report.eventStubs
+  };
+}
+
+function emptyFormSupport(): FormSupportSummary {
+  return {
+    controlsConverted: 0,
+    supportedControls: [],
+    degradedControls: [],
+    unknownControls: [],
+    controlCoverage: {
+      total: 0,
+      supported: 0,
+      degraded: 0,
+      unknown: 0,
+      supportedPercent: 0,
+      previewablePercent: 0,
+      unknownPercent: 0,
+      byKind: []
+    },
+    eventStubs: []
   };
 }
 

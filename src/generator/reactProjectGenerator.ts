@@ -149,7 +149,7 @@ function allocateFormFiles(forms: VisualForm[]): GeneratedFormFile[] {
 function appTsx(forms: GeneratedFormFile[]) {
   const imports = forms.map((item) => `import ${item.importName} from "../forms/${item.fileName}";`).join("\n");
   const formItems = forms
-    .map((item, index) => `{ id: "form-${index}", name: ${JSON.stringify(item.form.name)}, title: ${JSON.stringify(item.form.text ?? item.form.name)}, sourcePath: ${JSON.stringify(item.form.sourcePath)}, fileName: ${JSON.stringify(item.fileName)}, form: ${item.importName} }`)
+    .map((item, index) => `{ id: "form-${index}", name: ${JSON.stringify(item.form.name)}, title: ${JSON.stringify(item.form.text ?? item.form.name)}, sourcePath: ${JSON.stringify(item.form.sourcePath)}, controlCount: ${item.form.support.controlsConverted}, degradedCount: ${item.form.support.controlCoverage.degraded}, unknownCount: ${item.form.support.controlCoverage.unknown}, fileName: ${JSON.stringify(item.fileName)}, form: ${item.importName} }`)
     .join(",\n  ");
   return `import { useState } from "react";
 ${imports}
@@ -161,6 +161,9 @@ type PreviewForm = {
   name: string;
   title: string;
   sourcePath: string;
+  controlCount: number;
+  degradedCount: number;
+  unknownCount: number;
   fileName: string;
   form: unknown;
 };
@@ -207,6 +210,11 @@ export default function App() {
             >
               <span>{item.title}</span>
               <small>{item.sourcePath}</small>
+              <span className="preview-form-badges">
+                <em>{item.controlCount} controls</em>
+                {item.degradedCount > 0 ? <em>{item.degradedCount} degraded</em> : null}
+                {item.unknownCount > 0 ? <em className="warning">{item.unknownCount} unknown</em> : null}
+              </span>
             </button>
           ))}
         </nav>
@@ -477,6 +485,28 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.preview-form-list .preview-form-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.preview-form-badges em {
+  border: 1px solid #c8c8c8;
+  background: #fff;
+  padding: 1px 5px;
+  color: #555;
+  font-size: 10px;
+  font-style: normal;
+}
+
+.preview-form-badges em.warning {
+  border-color: #d49a60;
+  background: #fff4e8;
+  color: #7a3300;
 }
 
 .preview-form-list span {

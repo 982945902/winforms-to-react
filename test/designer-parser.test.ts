@@ -153,6 +153,14 @@ describe("parseDesignerSource", () => {
         { kind: "TextBox", count: 1, status: "supported" }
       ]
     });
+    expect(result.form.support).toEqual({
+      controlsConverted: 5,
+      supportedControls: ["Button", "DataGridView", "GroupBox", "Label", "TextBox"],
+      degradedControls: [],
+      unknownControls: [],
+      controlCoverage: result.report.controlCoverage,
+      eventStubs: [{ controlName: "btnSave", event: "Click", handler: "btnSave_Click" }]
+    });
     expect(serialized).not.toContain("typeName");
   });
 });

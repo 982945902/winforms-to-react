@@ -15,6 +15,23 @@ describe("generateReactProject", () => {
       text: "Sample",
       clientSize: { width: 300, height: 200 },
       autoScaleDimensions: { width: 6, height: 13 },
+      support: {
+        controlsConverted: 1,
+        supportedControls: ["Button"],
+        degradedControls: [],
+        unknownControls: [],
+        controlCoverage: {
+          total: 1,
+          supported: 1,
+          degraded: 0,
+          unknown: 0,
+          supportedPercent: 100,
+          previewablePercent: 100,
+          unknownPercent: 0,
+          byKind: [{ kind: "Button", count: 1, status: "supported" }]
+        },
+        eventStubs: [{ controlName: "button1", event: "Click", handler: "button1_Click" }]
+      },
       controls: [
         {
           kind: "Button",
@@ -67,6 +84,9 @@ describe("generateReactProject", () => {
       expect(app).toContain("preview-stat");
       expect(app).toContain("sourcePath: \"src/SampleForm.Designer.cs\"");
       expect(app).toContain("<small>{item.sourcePath}</small>");
+      expect(app).toContain("controlCount: 1");
+      expect(app).toContain("unknownCount: 0");
+      expect(app).toContain("preview-form-badges");
       expect(packageJson.devDependencies["@types/react"]).toBeDefined();
       expect(packageJson.devDependencies["@types/react-dom"]).toBeDefined();
       expect(formJson.name).toBe("SampleForm");
@@ -85,6 +105,23 @@ describe("generateReactProject", () => {
       sourcePath: "A/Form1.Designer.cs",
       text: "Form",
       clientSize: { width: 100, height: 80 },
+      support: {
+        controlsConverted: 0,
+        supportedControls: [],
+        degradedControls: [],
+        unknownControls: [],
+        controlCoverage: {
+          total: 0,
+          supported: 0,
+          degraded: 0,
+          unknown: 0,
+          supportedPercent: 0,
+          previewablePercent: 0,
+          unknownPercent: 0,
+          byKind: []
+        },
+        eventStubs: []
+      },
       controls: [],
       properties: {}
     };
