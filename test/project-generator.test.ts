@@ -87,6 +87,9 @@ describe("generateReactProject", () => {
       expect(app).toContain("controlCount: 1");
       expect(app).toContain("unknownCount: 0");
       expect(app).toContain("preview-form-badges");
+      expect(app).toContain("issueMode");
+      expect(app).toContain("visibleForms");
+      expect(app).toContain("preview-filter");
       expect(packageJson.devDependencies["@types/react"]).toBeDefined();
       expect(packageJson.devDependencies["@types/react-dom"]).toBeDefined();
       expect(formJson.name).toBe("SampleForm");

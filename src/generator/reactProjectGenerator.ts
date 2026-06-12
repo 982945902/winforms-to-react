@@ -174,7 +174,11 @@ const forms: PreviewForm[] = [
 
 export default function App() {
   const [selectedFormId, setSelectedFormId] = useState(forms[0]?.id ?? "");
-  const selectedForm = forms.find((item) => item.id === selectedFormId) ?? forms[0];
+  const [issueMode, setIssueMode] = useState(false);
+  const visibleForms = issueMode
+    ? forms.filter((item) => item.degradedCount > 0 || item.unknownCount > 0)
+    : forms;
+  const selectedForm = visibleForms.find((item) => item.id === selectedFormId) ?? visibleForms[0] ?? forms[0];
   const coverage = report.controlCoverage;
 
   return (
@@ -200,8 +204,31 @@ export default function App() {
             <strong>{coverage.unknown}</strong>
           </div>
         </div>
+        <div className="preview-filter" role="group" aria-label="Form filter">
+          <button
+            className={!issueMode ? "active" : ""}
+            type="button"
+            onClick={() => {
+              setIssueMode(false);
+              setSelectedFormId(forms[0]?.id ?? "");
+            }}
+          >
+            All
+          </button>
+          <button
+            className={issueMode ? "active" : ""}
+            type="button"
+            onClick={() => {
+              const firstIssue = forms.find((item) => item.degradedCount > 0 || item.unknownCount > 0);
+              setIssueMode(true);
+              setSelectedFormId(firstIssue?.id ?? "");
+            }}
+          >
+            Issues
+          </button>
+        </div>
         <nav className="preview-form-list" aria-label="Converted forms">
-          {forms.map((item) => (
+          {visibleForms.map((item) => (
             <button
               key={item.id}
               className={item.id === selectedForm?.id ? "active" : ""}
@@ -453,6 +480,33 @@ body {
   display: block;
   margin-top: 2px;
   font-size: 16px;
+  font-weight: 600;
+}
+
+.preview-filter {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin: 0 0 14px;
+  border: 1px solid #c7c7c7;
+  background: #fff;
+}
+
+.preview-filter button {
+  border: 0;
+  border-right: 1px solid #c7c7c7;
+  background: transparent;
+  padding: 7px 8px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.preview-filter button:last-child {
+  border-right: 0;
+}
+
+.preview-filter button.active {
+  background: #dcebff;
   font-weight: 600;
 }
 
