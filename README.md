@@ -4,7 +4,8 @@ Generic WinForms `.Designer.cs` to React compatibility-renderer converter.
 
 This is a visual migration tool, not a business-logic translator. The first
 milestone turns WinForms Designer files into a low-level Visual IR and emits a
-standalone React/Vite preview project with a WinForms-compatible renderer.
+standalone React/Vite preview project with a WinForms-compatible renderer and
+an instance-level support coverage report.
 
 ## Why this shape
 
@@ -59,6 +60,13 @@ The parser currently extracts:
 - menu/tool/status strip hierarchy from `Items.AddRange` and `DropDownItems.AddRange`
 - `DataGridView` column definitions from `Columns.AddRange`
 - event handler stubs from common `+=` Designer patterns
+
+The migration report includes `controlCoverage`, which records:
+
+- total parsed visual controls
+- supported, degraded, and unknown instance counts
+- supported, previewable, and unknown percentages
+- per-control-kind counts and support status
 
 The generated renderer has compatibility components for common WinForms
 controls such as buttons, labels, text boxes, combo boxes, checkboxes,

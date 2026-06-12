@@ -39,6 +39,16 @@ describe("generateReactProject", () => {
           supportedControls: ["Button"],
           degradedControls: [],
           unknownControls: [],
+          controlCoverage: {
+            total: 1,
+            supported: 1,
+            degraded: 0,
+            unknown: 0,
+            supportedPercent: 100,
+            previewablePercent: 100,
+            unknownPercent: 0,
+            byKind: [{ kind: "Button", count: 1, status: "supported" }]
+          },
           eventStubs: [{ controlName: "button1", event: "Click", handler: "button1_Click" }]
         }
       });
@@ -80,6 +90,16 @@ describe("generateReactProject", () => {
           supportedControls: [],
           degradedControls: [],
           unknownControls: [],
+          controlCoverage: {
+            total: 0,
+            supported: 0,
+            degraded: 0,
+            unknown: 0,
+            supportedPercent: 0,
+            previewablePercent: 0,
+            unknownPercent: 0,
+            byKind: []
+          },
           eventStubs: []
         }
       });

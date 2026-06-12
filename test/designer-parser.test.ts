@@ -136,6 +136,22 @@ describe("parseDesignerSource", () => {
     expect(result.report.supportedControls).toContain("Button");
     expect(result.report.supportedControls).toContain("DataGridView");
     expect(result.report.unknownControls).toEqual([]);
+    expect(result.report.controlCoverage).toEqual({
+      total: 5,
+      supported: 5,
+      degraded: 0,
+      unknown: 0,
+      supportedPercent: 100,
+      previewablePercent: 100,
+      unknownPercent: 0,
+      byKind: [
+        { kind: "Button", count: 1, status: "supported" },
+        { kind: "DataGridView", count: 1, status: "supported" },
+        { kind: "GroupBox", count: 1, status: "supported" },
+        { kind: "Label", count: 1, status: "supported" },
+        { kind: "TextBox", count: 1, status: "supported" }
+      ]
+    });
     expect(serialized).not.toContain("typeName");
   });
 });
@@ -254,5 +270,19 @@ describe("parseDesignerSource component classification", () => {
     ]);
     expect(result.report.degradedControls).toEqual(["PrintPreviewControl"]);
     expect(result.report.unknownControls).toEqual([]);
+    expect(result.report.controlCoverage).toEqual({
+      total: 3,
+      supported: 2,
+      degraded: 1,
+      unknown: 0,
+      supportedPercent: 66.7,
+      previewablePercent: 100,
+      unknownPercent: 0,
+      byKind: [
+        { kind: "BindingNavigator", count: 1, status: "supported" },
+        { kind: "PrintPreviewControl", count: 1, status: "degraded" },
+        { kind: "ToolStripContainer", count: 1, status: "supported" }
+      ]
+    });
   });
 });

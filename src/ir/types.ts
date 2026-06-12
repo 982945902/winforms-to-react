@@ -53,6 +53,25 @@ export type EventStub = {
   handler: string;
 };
 
+export type ControlSupportStatus = "supported" | "degraded" | "unknown";
+
+export type ControlCoverageByKind = {
+  kind: string;
+  count: number;
+  status: ControlSupportStatus;
+};
+
+export type ControlCoverage = {
+  total: number;
+  supported: number;
+  degraded: number;
+  unknown: number;
+  supportedPercent: number;
+  previewablePercent: number;
+  unknownPercent: number;
+  byKind: ControlCoverageByKind[];
+};
+
 export type MigrationReport = {
   sourceFiles: string[];
   formsConverted: number;
@@ -60,6 +79,7 @@ export type MigrationReport = {
   supportedControls: string[];
   degradedControls: string[];
   unknownControls: string[];
+  controlCoverage: ControlCoverage;
   eventStubs: EventStub[];
 };
 

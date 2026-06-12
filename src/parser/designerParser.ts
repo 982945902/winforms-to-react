@@ -1,4 +1,6 @@
 import type {
+  ControlCoverage,
+  ControlSupportStatus,
   EventStub,
   MigrationReport,
   ParseResult,
@@ -186,12 +188,16 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
   const supportedControls = new Set<string>();
   const degradedControls = new Set<string>();
   const unknownControls = new Set<string>();
+  const controlCounts = new Map<string, number>();
   const eventStubs: EventStub[] = [];
 
   for (const control of controls.values()) {
-    if (SUPPORTED_CONTROLS.has(control.kind)) {
+    const status = supportStatus(control.kind);
+    controlCounts.set(control.kind, (controlCounts.get(control.kind) ?? 0) + 1);
+
+    if (status === "supported") {
       supportedControls.add(control.kind);
-    } else if (DEGRADED_CONTROLS.has(control.kind)) {
+    } else if (status === "degraded") {
       degradedControls.add(control.kind);
     } else {
       unknownControls.add(control.kind);
@@ -209,6 +215,7 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
     supportedControls: [...supportedControls].sort(),
     degradedControls: [...degradedControls].sort(),
     unknownControls: [...unknownControls].sort(),
+    controlCoverage: buildControlCoverage(controlCounts),
     eventStubs
   };
 
@@ -509,6 +516,45 @@ function isDesignerComponentType(typeName: string): boolean {
 
 function isColumnKind(kind: string): boolean {
   return kind.startsWith("DataGridView") && kind.endsWith("Column");
+}
+
+function buildControlCoverage(controlCounts: Map<string, number>): ControlCoverage {
+  let supported = 0;
+  let degraded = 0;
+  let unknown = 0;
+
+  const byKind = [...controlCounts.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([kind, count]) => {
+      const status = supportStatus(kind);
+      if (status === "supported") supported += count;
+      if (status === "degraded") degraded += count;
+      if (status === "unknown") unknown += count;
+      return { kind, count, status };
+    });
+
+  const total = supported + degraded + unknown;
+  return {
+    total,
+    supported,
+    degraded,
+    unknown,
+    supportedPercent: percentage(supported, total),
+    previewablePercent: percentage(supported + degraded, total),
+    unknownPercent: percentage(unknown, total),
+    byKind
+  };
+}
+
+function supportStatus(kind: string): ControlSupportStatus {
+  if (SUPPORTED_CONTROLS.has(kind)) return "supported";
+  if (DEGRADED_CONTROLS.has(kind)) return "degraded";
+  return "unknown";
+}
+
+function percentage(part: number, total: number): number {
+  if (total === 0) return 0;
+  return Number(((part / total) * 100).toFixed(1));
 }
 
 function stripInternalControl(control: MutableControl): VisualControl {
