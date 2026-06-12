@@ -359,3 +359,55 @@ describe("parseDesignerSource list items", () => {
     expect(result.controlsByName.get("treeView1")?.items).toEqual(["Root", "Child"]);
   });
 });
+
+const MODERN_DESIGNER_FORM = `
+partial class ModernDesignerForm
+{
+    System.Windows.Forms.Button button1;
+    System.Windows.Forms.Label label1;
+    System.Windows.Forms.Panel panel1;
+
+    private void InitializeComponent()
+    {
+        button1 = new();
+        label1 = new System.Windows.Forms.Label();
+        panel1 = new();
+        button1.Location = new System.Drawing.Point(12, 16);
+        button1.Size = new System.Drawing.Size(75, 23);
+        button1.Text = "Save";
+        label1.Location = new System.Drawing.Point(8, 8);
+        label1.Size = new System.Drawing.Size(80, 16);
+        label1.Text = "Customer";
+        panel1.Location = new System.Drawing.Point(4, 44);
+        panel1.Size = new System.Drawing.Size(140, 48);
+        panel1.Controls.Add(label1);
+        Controls.Add(button1);
+        Controls.Add(panel1);
+        ClientSize = new System.Drawing.Size(180, 120);
+        Text = "Modern";
+    }
+}
+`;
+
+describe("parseDesignerSource modern Designer syntax", () => {
+  it("extracts target-typed controls and unqualified control references", () => {
+    const result = parseDesignerSource(MODERN_DESIGNER_FORM, {
+      sourcePath: "ModernDesignerForm.Designer.cs"
+    });
+
+    expect(result.form.clientSize).toEqual({ width: 180, height: 120 });
+    expect(result.form.text).toBe("Modern");
+    expect(result.form.controls.map((control) => control.name)).toEqual(["button1", "panel1"]);
+    expect(result.controlsByName.get("button1")).toMatchObject({
+      kind: "Button",
+      text: "Save",
+      bounds: { x: 12, y: 16, width: 75, height: 23 }
+    });
+    expect(result.controlsByName.get("panel1")?.children.map((control) => control.name)).toEqual(["label1"]);
+    expect(result.controlsByName.get("label1")).toMatchObject({
+      kind: "Label",
+      text: "Customer",
+      bounds: { x: 8, y: 8, width: 80, height: 16 }
+    });
+  });
+});

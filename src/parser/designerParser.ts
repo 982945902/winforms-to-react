@@ -141,7 +141,7 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
     }
   }
 
-  for (const [name, typeName] of parseInstantiations(source)) {
+  for (const [name, typeName] of parseInstantiations(source, fields)) {
     const declaredType = fields.get(name);
     if (declaredType && !isDesignerComponentType(declaredType)) continue;
 
@@ -238,19 +238,35 @@ function stripDesignerSuffix(sourcePath: string): string {
 
 function parseFieldTypes(source: string): Map<string, string> {
   const fields = new Map<string, string>();
-  const pattern = /\b(?:private|protected|internal|public)\s+(?:global::)?([A-Za-z_][\w.<>]*)\s+([A-Za-z_]\w*)\s*;/g;
-  for (const match of source.matchAll(pattern)) {
+  const explicitPattern = /^\s*(?:private|protected|internal|public)\s+(?:global::)?([A-Za-z_][\w.<>]*)\s+([A-Za-z_]\w*)\s*;/gm;
+  for (const match of source.matchAll(explicitPattern)) {
     fields.set(match[2], match[1]);
   }
+
+  const implicitPattern = /^\s*(?:global::)?([A-Za-z_][\w.<>]*)\s+([A-Za-z_]\w*)\s*;/gm;
+  for (const match of source.matchAll(implicitPattern)) {
+    const kind = shortTypeName(match[1]);
+    if (match[1].includes(".") || isKnownDesignerKind(kind)) {
+      fields.set(match[2], match[1]);
+    }
+  }
+
   return fields;
 }
 
-function parseInstantiations(source: string): Array<[string, string]> {
+function parseInstantiations(source: string, fields: Map<string, string>): Array<[string, string]> {
   const instances: Array<[string, string]> = [];
-  const pattern = /(?:this\.)?([A-Za-z_]\w*)\s*=\s*new\s+(?:global::)?([A-Za-z_][\w.]*)\s*\(/g;
-  for (const match of source.matchAll(pattern)) {
+  const typedPattern = /(?:this\.)?([A-Za-z_]\w*)\s*=\s*new\s+(?:global::)?([A-Za-z_][\w.]*)\s*\(/g;
+  for (const match of source.matchAll(typedPattern)) {
     instances.push([match[1], match[2]]);
   }
+
+  const targetTypedPattern = /(?:this\.)?([A-Za-z_]\w*)\s*=\s*new\s*\(\s*\)/g;
+  for (const match of source.matchAll(targetTypedPattern)) {
+    const declaredType = fields.get(match[1]);
+    if (declaredType) instances.push([match[1], declaredType]);
+  }
+
   return instances;
 }
 
@@ -282,11 +298,13 @@ function applyPropertyAssignments(
     }
   }
 
-  const formPropertyPattern = /this\.([A-Za-z_]\w*)\s*=\s*([^;]+);/g;
+  const formPropertyPattern = /(?:this\.)?([A-Za-z_]\w*)\s*=\s*([^;]+);/g;
   for (const match of source.matchAll(formPropertyPattern)) {
     if (consumedRanges.some(([start, end]) => match.index >= start && match.index < end)) continue;
 
     const property = match[1];
+    if (controls.has(property) || columns.has(property)) continue;
+
     const value = parseValue(match[2]);
     assignFormProperty(form, property, value);
   }
@@ -448,7 +466,7 @@ function isListLikeKind(kind: string): boolean {
 
 function applyControlHierarchy(source: string, controls: Map<string, MutableControl>, form: VisualForm) {
   const childParents = new Map<string, string>();
-  const controlAddPattern = /(?:this\.)?([A-Za-z_]\w*)\.Controls\.Add\(\s*this\.([A-Za-z_]\w*)\s*\)/g;
+  const controlAddPattern = /(?:this\.)?([A-Za-z_]\w*)\.Controls\.Add\(\s*(?:this\.)?([A-Za-z_]\w*)\s*\)/g;
   for (const match of source.matchAll(controlAddPattern)) {
     const parent = controls.get(match[1]);
     const child = controls.get(match[2]);
@@ -459,7 +477,7 @@ function applyControlHierarchy(source: string, controls: Map<string, MutableCont
     childParents.set(child.name, parent.name);
   }
 
-  const formAddPattern = /this\.Controls\.Add\(\s*this\.([A-Za-z_]\w*)\s*\)/g;
+  const formAddPattern = /(?:^|[;\r\n])\s*(?:this\.)?Controls\.Add\(\s*(?:this\.)?([A-Za-z_]\w*)\s*\)/g;
   for (const match of source.matchAll(formAddPattern)) {
     const child = controls.get(match[1]);
     if (!child) continue;
@@ -568,6 +586,10 @@ function isDesignerComponentType(typeName: string): boolean {
   if (SUPPORTED_CONTROLS.has(kind) || DEGRADED_CONTROLS.has(kind)) return true;
   if (typeName.includes("System.Drawing") || typeName.includes("System.ComponentModel")) return false;
   return typeName.includes("System.Windows.Forms") || !typeName.includes(".");
+}
+
+function isKnownDesignerKind(kind: string): boolean {
+  return SUPPORTED_CONTROLS.has(kind) || DEGRADED_CONTROLS.has(kind) || isColumnKind(kind);
 }
 
 function isColumnKind(kind: string): boolean {
