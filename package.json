@@ -1,0 +1,22 @@
+{
+  "name": "winforms-to-react",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Generic WinForms Designer.cs to React compatibility renderer converter.",
+  "type": "module",
+  "bin": {
+    "wf2react": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "npm run build && npm test"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}
