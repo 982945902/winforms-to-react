@@ -105,6 +105,7 @@ describe("parseDesignerSource", () => {
     const serialized = JSON.stringify(result.form);
 
     expect(result.form.name).toBe("OrderForm");
+    expect(result.form.sourcePath).toBe("OrderForm.Designer.cs");
     expect(result.form.text).toBe("Order Entry");
     expect(result.form.clientSize).toEqual({ width: 384, height: 311 });
     expect(result.form.controls.map((control) => control.name)).toEqual([

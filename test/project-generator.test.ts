@@ -11,6 +11,7 @@ describe("generateReactProject", () => {
     const form: VisualForm = {
       kind: "Form",
       name: "SampleForm",
+      sourcePath: "src/SampleForm.Designer.cs",
       text: "Sample",
       clientSize: { width: 300, height: 200 },
       autoScaleDimensions: { width: 6, height: 13 },
@@ -64,9 +65,12 @@ describe("generateReactProject", () => {
       expect(app).toContain("selectedForm");
       expect(app).toContain("preview-form-list");
       expect(app).toContain("preview-stat");
+      expect(app).toContain("sourcePath: \"src/SampleForm.Designer.cs\"");
+      expect(app).toContain("<small>{item.sourcePath}</small>");
       expect(packageJson.devDependencies["@types/react"]).toBeDefined();
       expect(packageJson.devDependencies["@types/react-dom"]).toBeDefined();
       expect(formJson.name).toBe("SampleForm");
+      expect(formJson.sourcePath).toBe("src/SampleForm.Designer.cs");
       expect(report.eventStubs[0].handler).toBe("button1_Click");
     } finally {
       await rm(outDir, { recursive: true, force: true });
@@ -78,6 +82,7 @@ describe("generateReactProject", () => {
     const form: VisualForm = {
       kind: "Form",
       name: "Form1",
+      sourcePath: "A/Form1.Designer.cs",
       text: "Form",
       clientSize: { width: 100, height: 80 },
       controls: [],

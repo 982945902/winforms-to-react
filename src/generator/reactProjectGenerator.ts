@@ -149,7 +149,7 @@ function allocateFormFiles(forms: VisualForm[]): GeneratedFormFile[] {
 function appTsx(forms: GeneratedFormFile[]) {
   const imports = forms.map((item) => `import ${item.importName} from "../forms/${item.fileName}";`).join("\n");
   const formItems = forms
-    .map((item, index) => `{ id: "form-${index}", name: ${JSON.stringify(item.form.name)}, title: ${JSON.stringify(item.form.text ?? item.form.name)}, fileName: ${JSON.stringify(item.fileName)}, form: ${item.importName} }`)
+    .map((item, index) => `{ id: "form-${index}", name: ${JSON.stringify(item.form.name)}, title: ${JSON.stringify(item.form.text ?? item.form.name)}, sourcePath: ${JSON.stringify(item.form.sourcePath)}, fileName: ${JSON.stringify(item.fileName)}, form: ${item.importName} }`)
     .join(",\n  ");
   return `import { useState } from "react";
 ${imports}
@@ -160,6 +160,7 @@ type PreviewForm = {
   id: string;
   name: string;
   title: string;
+  sourcePath: string;
   fileName: string;
   form: unknown;
 };
@@ -205,7 +206,7 @@ export default function App() {
               onClick={() => setSelectedFormId(item.id)}
             >
               <span>{item.title}</span>
-              <small>{item.fileName}</small>
+              <small>{item.sourcePath}</small>
             </button>
           ))}
         </nav>

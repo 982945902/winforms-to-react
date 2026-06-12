@@ -41,6 +41,7 @@ export type VisualControl = {
 export type VisualForm = {
   kind: "Form";
   name: string;
+  sourcePath: string;
   text?: string;
   clientSize?: VisualSize;
   autoScaleDimensions?: VisualSize;

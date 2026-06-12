@@ -170,6 +170,7 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
   const form: VisualForm = {
     kind: "Form",
     name: className,
+    sourcePath: options.sourcePath,
     controls: [],
     properties: {}
   };
