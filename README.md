@@ -59,6 +59,8 @@ The parser currently extracts:
 - control hierarchy from `Controls.Add`
 - menu/tool/status strip hierarchy from `Items.AddRange` and `DropDownItems.AddRange`
 - `DataGridView` column definitions from `Columns.AddRange`
+- static list items from `Items.AddRange`, `Items.Add`, and simple `TreeNode`
+  constructors
 - event handler stubs from common `+=` Designer patterns
 
 The migration report includes `controlCoverage`, which records:

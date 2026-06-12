@@ -34,6 +34,7 @@ export type VisualControl = {
   properties: Record<string, unknown>;
   events: VisualEvent[];
   columns?: VisualColumn[];
+  items?: string[];
   children: VisualControl[];
 };
 

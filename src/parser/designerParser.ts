@@ -177,6 +177,7 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
   applyPropertyAssignments(source, controls, columns, form);
   applyEvents(source, controls);
   applyColumns(source, controls, columns);
+  applyListItems(source, controls);
   applyControlHierarchy(source, controls, form);
   applyToolStripHierarchy(source, controls);
 
@@ -388,6 +389,61 @@ function applyColumns(source: string, controls: Map<string, MutableControl>, col
       .filter((name) => columns.has(name));
     grid.columns = refs.map((name) => stripInternalColumn(columns.get(name)!));
   }
+}
+
+function applyListItems(source: string, controls: Map<string, MutableControl>) {
+  const addRangePattern = /(?:this\.)?([A-Za-z_]\w*)\.Items\.AddRange\(\s*new\s*(?:(?:(?:System\.)?(?:Object|String)|object|string)\s*)?\[\]\s*\{([\s\S]*?)\}\s*\);/g;
+  for (const match of source.matchAll(addRangePattern)) {
+    const control = controls.get(match[1]);
+    if (!control || !isListLikeKind(control.kind)) continue;
+    appendItems(control, extractStringLiterals(match[2]));
+  }
+
+  const addPattern = /(?:this\.)?([A-Za-z_]\w*)\.Items\.Add\(\s*(@?"(?:[^"\\]|\\.|"")*")\s*(?:,[^)]*)?\);/g;
+  for (const match of source.matchAll(addPattern)) {
+    const control = controls.get(match[1]);
+    if (!control || !isListLikeKind(control.kind)) continue;
+    appendItems(control, [String(parseValue(match[2]))]);
+  }
+
+  const treeNodes = parseTreeNodeTexts(source);
+  const nodeAddRangePattern = /(?:this\.)?([A-Za-z_]\w*)\.Nodes\.AddRange\(\s*new\s+(?:[A-Za-z_][\w.]*\.)?TreeNode\[\]\s*\{([\s\S]*?)\}\s*\);/g;
+  for (const match of source.matchAll(nodeAddRangePattern)) {
+    const control = controls.get(match[1]);
+    if (!control || control.kind !== "TreeView") continue;
+
+    const items = [...match[2].matchAll(/(?:this\.)?([A-Za-z_]\w*)/g)]
+      .map((ref) => treeNodes.get(ref[1]))
+      .filter((item): item is string => typeof item === "string");
+    appendItems(control, items);
+  }
+}
+
+function parseTreeNodeTexts(source: string): Map<string, string> {
+  const treeNodes = new Map<string, string>();
+  const pattern = /(?:[A-Za-z_][\w.]*\.)?TreeNode\s+([A-Za-z_]\w*)\s*=\s*new\s+(?:[A-Za-z_][\w.]*\.)?TreeNode\s*\(\s*(@?"(?:[^"\\]|\\.|"")*")/g;
+  for (const match of source.matchAll(pattern)) {
+    treeNodes.set(match[1], String(parseValue(match[2])));
+  }
+  return treeNodes;
+}
+
+function extractStringLiterals(source: string): string[] {
+  return [...source.matchAll(/@?"(?:[^"\\]|\\.|"")*"/g)].map((match) => String(parseValue(match[0])));
+}
+
+function appendItems(control: MutableControl, items: string[]) {
+  if (items.length === 0) return;
+  control.items = [...(control.items ?? []), ...items];
+}
+
+function isListLikeKind(kind: string): boolean {
+  return kind === "CheckedListBox"
+    || kind === "ComboBox"
+    || kind === "DomainUpDown"
+    || kind === "ListBox"
+    || kind === "ListView"
+    || kind === "ToolStripComboBox";
 }
 
 function applyControlHierarchy(source: string, controls: Map<string, MutableControl>, form: VisualForm) {

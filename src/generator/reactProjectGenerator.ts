@@ -194,6 +194,7 @@ export type VisualControl = {
   properties?: Record<string, unknown>;
   events?: Array<{ event: string; handler: string }>;
   columns?: Array<{ name: string; headerText?: string; width?: number; kind: string }>;
+  items?: string[];
   children?: VisualControl[];
 };
 
@@ -224,6 +225,7 @@ function WinControl({ control }: { control: VisualControl }) {
   const style = boundsStyle(control);
   const children = control.children ?? [];
   const label = control.text ?? "";
+  const items = itemTexts(control);
 
   switch (control.kind) {
     case "Label":
@@ -235,7 +237,7 @@ function WinControl({ control }: { control: VisualControl }) {
       return <button className="wf-button" style={style} title={eventTitle(control)}>{label || control.name}</button>;
     case "ComboBox":
     case "DomainUpDown":
-      return <select className="wf-select" style={style} aria-label={control.name}><option>{label}</option></select>;
+      return <select className="wf-select" style={style} aria-label={control.name}>{items.map((item) => <option key={item}>{item}</option>)}</select>;
     case "CheckBox":
       return <label className="wf-check" style={style}><input type="checkbox" /> <span>{label}</span></label>;
     case "RadioButton":
@@ -268,16 +270,17 @@ function WinControl({ control }: { control: VisualControl }) {
     case "ToolStripSeparator":
       return <span className="wf-strip-separator" />;
     case "ToolStripComboBox":
-      return <select className="wf-strip-combo"><option>{label || control.name}</option></select>;
+      return <select className="wf-strip-combo">{items.map((item) => <option key={item}>{item}</option>)}</select>;
     case "ToolStripTextBox":
       return <input className="wf-strip-input" defaultValue={label} aria-label={control.name} />;
     case "ToolStripProgressBar":
       return <progress className="wf-strip-progress" />;
     case "ListBox":
-    case "CheckedListBox":
     case "ListView":
     case "TreeView":
-      return <div className="wf-list" style={style}>{label || control.name}</div>;
+      return <div className="wf-list" style={style}>{items.map((item) => <div key={item} className="wf-list-item">{item}</div>)}</div>;
+    case "CheckedListBox":
+      return <div className="wf-list" style={style}>{items.map((item) => <label key={item} className="wf-list-item wf-list-check"><input type="checkbox" /> {item}</label>)}</div>;
     case "LinkLabel":
       return <a className="wf-label wf-link" style={style}>{label || control.name}</a>;
     case "HScrollBar":
@@ -328,6 +331,12 @@ function boundsStyle(control: VisualControl): CSSProperties {
 function eventTitle(control: VisualControl) {
   const events = control.events ?? [];
   return events.length ? events.map((event) => event.handler).join(", ") : undefined;
+}
+
+function itemTexts(control: VisualControl) {
+  const items = control.items ?? [];
+  if (items.length > 0) return items;
+  return [control.text || control.name];
 }
 `;
 }
@@ -525,6 +534,18 @@ body {
   background: white;
   font-size: 12px;
   padding: 4px;
+}
+
+.wf-list-item {
+  min-height: 18px;
+  line-height: 18px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.wf-list-check {
+  display: block;
 }
 
 .wf-link {

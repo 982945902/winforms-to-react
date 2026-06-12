@@ -286,3 +286,76 @@ describe("parseDesignerSource component classification", () => {
     });
   });
 });
+
+const LIST_ITEM_FORM = `
+partial class ListItemForm
+{
+    private System.Windows.Forms.ComboBox comboBox1;
+    private System.Windows.Forms.ListBox listBox1;
+    private System.Windows.Forms.CheckedListBox checkedListBox1;
+    private System.Windows.Forms.DomainUpDown domainUpDown1;
+    private System.Windows.Forms.ListView listView1;
+    private System.Windows.Forms.TreeView treeView1;
+
+    private void InitializeComponent()
+    {
+        System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(ListItemForm));
+        System.Windows.Forms.TreeNode treeNode1 = new System.Windows.Forms.TreeNode("Root");
+        System.Windows.Forms.TreeNode treeNode2 = new System.Windows.Forms.TreeNode("Child");
+        this.comboBox1 = new System.Windows.Forms.ComboBox();
+        this.listBox1 = new System.Windows.Forms.ListBox();
+        this.checkedListBox1 = new System.Windows.Forms.CheckedListBox();
+        this.domainUpDown1 = new System.Windows.Forms.DomainUpDown();
+        this.listView1 = new System.Windows.Forms.ListView();
+        this.treeView1 = new System.Windows.Forms.TreeView();
+        this.comboBox1.Items.AddRange(new object[] {
+            "Open",
+            "Closed"});
+        this.listBox1.Items.AddRange(new object[] { "North", "South" });
+        this.checkedListBox1.Items.AddRange(new object[] {
+            "Approved",
+            "Archived"});
+        this.domainUpDown1.Items.Add("First");
+        this.domainUpDown1.Items.Add("Second");
+        this.listView1.Items.AddRange(new System.Windows.Forms.ListViewItem[] {
+            ((System.Windows.Forms.ListViewItem)(resources.GetObject("listView1.Items")))});
+        this.treeView1.Nodes.AddRange(new System.Windows.Forms.TreeNode[] {
+            treeNode1,
+            treeNode2});
+        this.comboBox1.Location = new System.Drawing.Point(8, 8);
+        this.comboBox1.Size = new System.Drawing.Size(120, 23);
+        this.listBox1.Location = new System.Drawing.Point(8, 40);
+        this.listBox1.Size = new System.Drawing.Size(120, 60);
+        this.checkedListBox1.Location = new System.Drawing.Point(136, 40);
+        this.checkedListBox1.Size = new System.Drawing.Size(120, 60);
+        this.domainUpDown1.Location = new System.Drawing.Point(8, 108);
+        this.domainUpDown1.Size = new System.Drawing.Size(120, 23);
+        this.listView1.Location = new System.Drawing.Point(136, 108);
+        this.listView1.Size = new System.Drawing.Size(120, 120);
+        this.treeView1.Location = new System.Drawing.Point(8, 140);
+        this.treeView1.Size = new System.Drawing.Size(160, 120);
+        this.ClientSize = new System.Drawing.Size(280, 280);
+        this.Controls.Add(this.treeView1);
+        this.Controls.Add(this.listView1);
+        this.Controls.Add(this.domainUpDown1);
+        this.Controls.Add(this.checkedListBox1);
+        this.Controls.Add(this.listBox1);
+        this.Controls.Add(this.comboBox1);
+    }
+}
+`;
+
+describe("parseDesignerSource list items", () => {
+  it("extracts static items for list-like controls", () => {
+    const result = parseDesignerSource(LIST_ITEM_FORM, {
+      sourcePath: "ListItemForm.Designer.cs"
+    });
+
+    expect(result.controlsByName.get("comboBox1")?.items).toEqual(["Open", "Closed"]);
+    expect(result.controlsByName.get("listBox1")?.items).toEqual(["North", "South"]);
+    expect(result.controlsByName.get("checkedListBox1")?.items).toEqual(["Approved", "Archived"]);
+    expect(result.controlsByName.get("domainUpDown1")?.items).toEqual(["First", "Second"]);
+    expect(result.controlsByName.get("listView1")?.items).toBeUndefined();
+    expect(result.controlsByName.get("treeView1")?.items).toEqual(["Root", "Child"]);
+  });
+});
