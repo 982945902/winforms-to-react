@@ -23,6 +23,7 @@ import type {
 
 export type ParseDesignerOptions = {
   sourcePath: string;
+  baseKindMap?: Map<string, string>;
 };
 
 type MutableControl = VisualControl & {
@@ -87,15 +88,15 @@ const SUPPORTED_CONTROLS = new Set([
   "ToolStripTextBox",
   "TrackBar",
   "TreeView",
+  "UserControl",
   "VScrollBar",
-  "WebBrowser"
+  "WebBrowser",
+  "ElementHost"
 ]);
 
 const DEGRADED_CONTROLS = new Set([
   "Chart",
-  "ErrorProvider",
-  "Timer",
-  "ToolTip"
+  "Control"
 ]);
 
 const NON_CONTROL_KINDS = new Set([
@@ -105,6 +106,8 @@ const NON_CONTROL_KINDS = new Set([
   "Container",
   "ContextMenuStrip",
   "Cursor",
+  "DataGridViewCellStyle",
+  "ErrorProvider",
   "FolderBrowserDialog",
   "FontDialog",
   "Font",
@@ -122,6 +125,9 @@ const NON_CONTROL_KINDS = new Set([
   "SizeF",
   "String",
   "TreeNode",
+  "ToolTip",
+  "Timer",
+  "NotifyIcon",
   "decimal"
 ]);
 
@@ -202,6 +208,12 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
   applyToolStripHierarchy(stripped, controls);
   applySplitContainer(stripped, controls);
   applyNestedControlProperties(stripped, controls);
+
+  // Resolve custom control kinds to known WinForms base kinds so the renderer
+  // and coverage report treat them as their base control (e.g. MyListView -> ListView).
+  if (options.baseKindMap && options.baseKindMap.size > 0) {
+    for (const control of controls.values()) resolveControlKind(control, options.baseKindMap);
+  }
 
   if (form.controls.length === 0) {
     const childNames = new Set([...controls.values()].flatMap((control) => control.children.map((child) => child.name)));
@@ -1278,6 +1290,34 @@ function supportStatus(kind: string): ControlSupportStatus {
   if (SUPPORTED_CONTROLS.has(kind)) return "supported";
   if (DEGRADED_CONTROLS.has(kind)) return "degraded";
   return "unknown";
+}
+
+// Resolve a custom control kind to a known WinForms base kind via the
+// inheritance map (e.g. MyListView -> ListView). Returns the first known
+// ancestor kind, or the original kind if no mapping exists.
+function resolveBaseKind(kind: string, baseKindMap?: Map<string, string>): string {
+  if (!baseKindMap) return kind;
+  const seen = new Set<string>([kind]);
+  let current = kind;
+  for (let i = 0; i < 32; i += 1) {
+    if (SUPPORTED_CONTROLS.has(current) || DEGRADED_CONTROLS.has(current)) return current;
+    const base = baseKindMap.get(current);
+    if (!base || seen.has(base)) return kind;
+    seen.add(base);
+    current = base;
+  }
+  return kind;
+}
+
+// Recursively replace control.kind with its resolved base kind, preserving
+// the original kind in properties.originalKind for traceability.
+function resolveControlKind(control: MutableControl, baseKindMap: Map<string, string>): void {
+  const resolved = resolveBaseKind(control.kind, baseKindMap);
+  if (resolved !== control.kind) {
+    if (!control.properties.originalKind) control.properties.originalKind = control.kind;
+    control.kind = resolved;
+  }
+  for (const child of control.children) resolveControlKind(child as MutableControl, baseKindMap);
 }
 
 function percentage(part: number, total: number): number {

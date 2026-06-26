@@ -21,12 +21,13 @@ export async function findDesignerFiles(inputPath: string): Promise<string[]> {
 
 export async function convertDesignerSources(inputPath: string): Promise<ConvertSourceResult> {
   const files = await findDesignerFiles(inputPath);
+  const baseKindMap = await collectBaseKindMap(inputPath);
   const forms: VisualForm[] = [];
   const reports: MigrationReport[] = [];
 
   for (const file of files) {
     const source = await readFile(file, "utf8");
-    const result = parseDesignerSource(source, { sourcePath: file });
+    const result = parseDesignerSource(source, { sourcePath: file, baseKindMap });
     forms.push(result.form);
     reports.push(result.report);
   }
@@ -35,6 +36,42 @@ export async function convertDesignerSources(inputPath: string): Promise<Convert
     forms,
     report: mergeReports(reports)
   };
+}
+
+// Scan all non-Designer .cs files for `class X : Y` declarations and build a map
+// of custom class name -> base class short name. Used to resolve custom
+// WinForms controls to their known base control kind for rendering.
+async function collectBaseKindMap(inputPath: string): Promise<Map<string, string>> {
+  const csFiles: string[] = [];
+  const info = await stat(inputPath);
+  if (info.isDirectory()) {
+    await walkCs(inputPath, csFiles);
+  }
+
+  const map = new Map<string, string>();
+  const pattern = /^\s*(?:public|internal|protected|private)?\s*(?:partial\s+)?class\s+([A-Za-z_]\w*)\s*:\s*([A-Za-z_][\w.]*)/gm;
+  for (const file of csFiles) {
+    const source = await readFile(file, "utf8");
+    for (const match of source.matchAll(pattern)) {
+      const derived = match[1];
+      const base = match[2].split(".").pop() ?? match[2];
+      if (derived !== base) map.set(derived, base);
+    }
+  }
+  return map;
+}
+
+async function walkCs(dir: string, files: string[]) {
+  const entries = await readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.name === "bin" || entry.name === "obj" || entry.name === ".git") continue;
+    const fullPath = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await walkCs(fullPath, files);
+    } else if (entry.isFile() && entry.name.endsWith(".cs") && !entry.name.endsWith(".Designer.cs")) {
+      files.push(fullPath);
+    }
+  }
 }
 
 async function walk(dir: string, files: string[]) {

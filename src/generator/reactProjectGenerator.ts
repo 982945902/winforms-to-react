@@ -559,6 +559,7 @@ function WinControl({ control, hostStyle }: { control: VisualControl; hostStyle?
     case "Panel":
     case "TabPage":
     case "ToolStripContainer":
+    case "UserControl":
       return <div className="wf-panel" style={style}>{children.map((child, index) => <WinControl key={child.name} control={child} hostStyle={childStyles[index]} />)}</div>;
     case "FlowLayoutPanel":
       return <WinFlowLayoutPanel control={control} style={style} />;
@@ -576,12 +577,16 @@ function WinControl({ control, hostStyle }: { control: VisualControl; hostStyle?
     case "ToolStrip":
     case "BindingNavigator":
     case "StatusStrip":
-      return <div className={"wf-strip wf-strip-" + control.kind.toLowerCase()} style={style}>{children.length ? children.map((child) => <WinControl key={child.name} control={child} />) : (label || control.name)}</div>;
+      return <div className={"wf-strip wf-strip-" + control.kind.toLowerCase()} style={style}>{children.length ? children.map((child) => {
+        const b = child.bounds ?? { x: 0, y: 0, width: 0, height: 0 };
+        const childStyle: CSSProperties = { position: "relative", height: b.height || undefined };
+        return <WinControl key={child.name} control={child} hostStyle={childStyle} />;
+      }) : (label || control.name)}</div>;
     case "ToolStripButton":
     case "ToolStripDropDownButton":
     case "ToolStripSplitButton":
     case "ToolStripMenuItem":
-      return <button className="wf-strip-button" title={eventTitle(control)}>{label || control.name}{children.map((child) => <WinControl key={child.name} control={child} />)}</button>;
+      return <button className="wf-strip-button" style={style} title={eventTitle(control)}>{label || control.name}{children.map((child) => <WinControl key={child.name} control={child} />)}</button>;
     case "ToolStripLabel":
     case "ToolStripStatusLabel":
       return <span className="wf-strip-label">{label || control.name}</span>;
@@ -656,12 +661,10 @@ function WinControl({ control, hostStyle }: { control: VisualControl; hostStyle?
       return <WinPropertyGrid control={control} style={style} />;
     case "WebBrowser":
       return <WinWebBrowser control={control} style={style} />;
+    case "ElementHost":
+      return <div className="wf-element-host" style={style}><span>WPF Content</span><small>{control.name}</small></div>;
     case "Chart":
       return <div className="wf-unknown wf-degraded" style={style}><span>Chart</span><small>chart (degraded)</small></div>;
-    case "ErrorProvider":
-    case "ToolTip":
-    case "Timer":
-      return null;
     default:
       return <div className="wf-unknown" style={style}>{control.kind}: {control.name}</div>;
   }
@@ -955,7 +958,8 @@ function isContainerKind(kind: string): boolean {
     || kind === "TabPage"
     || kind === "ToolStripContainer"
     || kind === "TabControl"
-    || kind === "SplitContainer";
+    || kind === "SplitContainer"
+    || kind === "UserControl";
 }
 
 function eventTitle(control: VisualControl) {
@@ -1239,6 +1243,7 @@ body {
   font-size: 12px;
   padding: 3px 6px;
   white-space: nowrap;
+  overflow: hidden;
 }
 
 .wf-strip-button,
@@ -1439,6 +1444,22 @@ body {
   color: #888;
   font-size: 12px;
   background: #fff;
+}
+
+.wf-element-host {
+  box-sizing: border-box;
+  border: 1px solid #717171;
+  background: #f8f8f8;
+  display: grid;
+  place-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #555;
+}
+
+.wf-element-host small {
+  color: #999;
+  font-size: 10px;
 }
 
 .wf-scrollbar {
