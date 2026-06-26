@@ -308,4 +308,77 @@ describe("generateReactProject", () => {
       await rm(outDir, { recursive: true, force: true });
     }
   });
+
+
+  it("renders FlowLayoutPanel children in flex flow and TLP cells in grid", async () => {
+    const outDir = await mkdtemp(join(tmpdir(), "wf2react-align-"));
+    const form: VisualForm = {
+      kind: "Form",
+      name: "AlignForm",
+      sourcePath: "AlignForm.Designer.cs",
+      text: "Align",
+      clientSize: { width: 300, height: 200 },
+      support: {
+        controlsConverted: 3,
+        supportedControls: ["Button", "FlowLayoutPanel"],
+        degradedControls: [],
+        unknownControls: [],
+        controlCoverage: {
+          total: 3, supported: 3, degraded: 0, unknown: 0,
+          supportedPercent: 100, previewablePercent: 100, unknownPercent: 0,
+          byKind: [
+            { kind: "Button", count: 2, status: "supported" },
+            { kind: "FlowLayoutPanel", count: 1, status: "supported" }
+          ]
+        },
+        eventStubs: []
+      },
+      controls: [
+        {
+          kind: "FlowLayoutPanel",
+          name: "flp1",
+          flowDirection: "TopDown",
+          wrapContents: false,
+          bounds: { x: 10, y: 10, width: 200, height: 180 },
+          properties: {}, events: [], children: [
+            { kind: "Button", name: "b1", text: "A", bounds: { x: 0, y: 0, width: 80, height: 30 }, appearance: {}, properties: {}, events: [], children: [] },
+            { kind: "Button", name: "b2", text: "B", bounds: { x: 0, y: 36, width: 80, height: 30 }, appearance: {}, properties: {}, events: [], children: [] }
+          ],
+          appearance: {}
+        },
+        {
+          kind: "Button",
+          name: "topBtn",
+          text: "Top",
+          bounds: { x: 220, y: 10, width: 60, height: 30 },
+          appearance: {}, properties: {}, events: [], children: []
+        }
+      ],
+      properties: {}
+    };
+
+    try {
+      await generateReactProject({
+        outDir,
+        forms: [form],
+        report: {
+          sourceFiles: ["AlignForm.Designer.cs"],
+          forms: [{ name: "AlignForm", title: "Align", sourcePath: "AlignForm.Designer.cs", support: form.support }],
+          formsConverted: 1,
+          controlsConverted: 3,
+          supportedControls: ["Button", "FlowLayoutPanel"],
+          degradedControls: [],
+          unknownControls: [],
+          controlCoverage: form.support.controlCoverage,
+          eventStubs: []
+        }
+      });
+
+      const compat = await readFile(join(outDir, "src", "winformsCompat.tsx"), "utf8");
+      expect(compat).toContain('position: "relative", width: b.width, height: b.height');
+      expect(compat).toContain('width: "100%", height: "100%"');
+    } finally {
+      await rm(outDir, { recursive: true, force: true });
+    }
+  });
 });

@@ -684,7 +684,11 @@ function WinFlowLayoutPanel({ control, style }: { control: VisualControl; style:
   }
   return (
     <div className="wf-flow" style={flowStyle}>
-      {children.map((child) => <WinControl key={child.name} control={child} />)}
+      {children.map((child) => {
+        const b = child.bounds ?? { x: 0, y: 0, width: 0, height: 0 };
+        const childStyle: CSSProperties = { position: "relative", width: b.width, height: b.height };
+        return <WinControl key={child.name} control={child} hostStyle={childStyle} />;
+      })}
     </div>
   );
 }
@@ -808,9 +812,12 @@ function WinTableLayoutPanel({ control, style }: { control: VisualControl; style
         const cellStyle: CSSProperties = {
           gridColumn: \`\${cell[0] + 1} / span \${colSpan}\`,
           gridRow: \`\${cell[1] + 1} / span \${rowSpan}\`,
-          position: "relative"
+          position: "relative",
+          display: "flex"
         };
-        return <div key={child.name} style={cellStyle}><WinControl control={child} /></div>;
+        const b = child.bounds ?? { x: 0, y: 0, width: 0, height: 0 };
+        const childStyle: CSSProperties = { position: "relative", width: "100%", height: "100%" };
+        return <div key={child.name} style={cellStyle}><WinControl control={child} hostStyle={childStyle} /></div>;
       })}
     </div>
   );
