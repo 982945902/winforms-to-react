@@ -313,6 +313,12 @@ export type VisualAppearance = {
   scrollBars?: string;
   view?: string;
   mask?: string;
+  imageLocation?: string;
+  sizeMode?: string;
+  rows?: number;
+  zoom?: number;
+  autoZoom?: boolean;
+  url?: string;
   checkAlign?: VisualContentAlignment;
   imageAlign?: VisualContentAlignment;
   appearanceStyle?: string;
@@ -634,13 +640,22 @@ function WinControl({ control, hostStyle }: { control: VisualControl; hostStyle?
       }
       return <div className="wf-picture" style={style}>{control.name}</div>;
     }
-    case "PrintPreviewControl":
-      return <div className="wf-print-preview" style={style}><span>{label || "Print preview"}</span></div>;
+    case "PrintPreviewControl": {
+      const a = control.appearance ?? {};
+      const zoom = a.zoom ?? 1;
+      const pageH = Math.round((style.height as number | undefined ?? 400) * Math.min(zoom, 1));
+      const pageW = Math.round((style.width as number | undefined ?? 300) * Math.min(zoom, 1));
+      return (
+        <div className="wf-print-preview" style={style}>
+          <div className="wf-print-page" style={{ width: pageW, height: pageH }} />
+        </div>
+      );
+    }
     case "PropertyGrid":
     case "PropertyGridExtended":
-      return <div className="wf-unknown wf-degraded" style={style}><span>{control.kind}</span><small>property grid (degraded)</small></div>;
+      return <WinPropertyGrid control={control} style={style} />;
     case "WebBrowser":
-      return <div className="wf-unknown wf-degraded" style={style}><span>WebBrowser</span><small>embedded browser (degraded)</small></div>;
+      return <WinWebBrowser control={control} style={style} />;
     case "Chart":
       return <div className="wf-unknown wf-degraded" style={style}><span>Chart</span><small>chart (degraded)</small></div>;
     case "ErrorProvider":
@@ -697,6 +712,71 @@ function WinSplitContainer({ control, style }: { control: VisualControl; style: 
       <div className="wf-split-panel" style={panel1Style}>{p1.map((c) => <WinControl key={c.name} control={c} />)}</div>
       <div className="wf-splitter-bar" aria-hidden="true" />
       <div className="wf-split-panel" style={panel2Style}>{p2.map((c) => <WinControl key={c.name} control={c} />)}{rest.map((c) => <WinControl key={c.name} control={c} />)}</div>
+    </div>
+  );
+}
+
+// PropertyGrid: VS-style property browser with toolbar, categorized rows,
+// and a name|value two-column layout. Static placeholder rows approximate the
+// runtime appearance; actual selected-object content is not available from
+// Designer files.
+function WinPropertyGrid({ control, style }: { control: VisualControl; style: CSSProperties }) {
+  const rows = [
+    { cat: "Appearance", props: [["BackColor", "Control"], ["ForeColor", "ControlText"], ["Font", "Segoe UI, 9pt"], ["Text", control.text ?? control.name]] },
+    { cat: "Layout", props: [["Location", boundsText(control)], ["Size", sizeText(control)], ["Dock", (control.dock ?? "None")], ["Anchor", "Top, Left"]] },
+    { cat: "Behavior", props: [["Enabled", "True"], ["Visible", "True"], ["TabIndex", String(control.tabIndex ?? 0)]] }
+  ];
+  return (
+    <div className="wf-propgrid" style={style}>
+      <div className="wf-propgrid-toolbar">
+        <span className="wf-propgrid-btn" title="Categorized">\u229e</span>
+        <span className="wf-propgrid-btn" title="Alphabetical">\u2261</span>
+        <span className="wf-propgrid-btn" title="Properties">\ud83d\udcc4</span>
+        <span className="wf-propgrid-btn" title="Events">\u26a1</span>
+      </div>
+      <div className="wf-propgrid-body">
+        {rows.map((row) => (
+          <div key={row.cat} className="wf-propgrid-cat">
+            <div className="wf-propgrid-cat-header">\u25be {row.cat}</div>
+            {row.props.map(([name, val]) => (
+              <div key={name} className="wf-propgrid-row">
+                <span className="wf-propgrid-name">{name}</span>
+                <span className="wf-propgrid-val">{val}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function boundsText(control: VisualControl): string {
+  const b = control.bounds;
+  return b ? b.x + ", " + b.y : "0, 0";
+}
+
+function sizeText(control: VisualControl): string {
+  const b = control.bounds;
+  return b ? b.width + ", " + b.height : "0, 0";
+}
+
+// WebBrowser: address bar + content frame. Url from Designer is shown in the
+// address bar; the content area renders a placeholder since cross-origin iframes
+// cannot be reliably embedded and most Designer Urls are commented out.
+function WinWebBrowser({ control, style }: { control: VisualControl; style: CSSProperties }) {
+  const a = control.appearance ?? {};
+  const url = a.url ?? "";
+  return (
+    <div className="wf-webbrowser" style={style}>
+      <div className="wf-webbrowser-bar">
+        <span className="wf-webbrowser-back">\u2190</span>
+        <span className="wf-webbrowser-fwd">\u2192</span>
+        <input className="wf-webbrowser-url" defaultValue={url} readOnly placeholder="about:blank" />
+      </div>
+      <div className="wf-webbrowser-content">
+        {url ? <span>Navigation to {url} is not available in preview</span> : <span>about:blank</span>}
+      </div>
     </div>
   );
 }
@@ -1215,14 +1295,143 @@ body {
 }
 
 .wf-print-preview {
+  box-sizing: border-box;
+  border: 1px solid #9a9a9a;
+  background: #e0e0e0;
+  overflow: auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 8px;
+}
+
+.wf-print-page {
+  background: white;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+  border: 1px solid #c0c0c0;
+}
+
+.wf-propgrid {
+  box-sizing: border-box;
+  border: 1px solid #717171;
+  background: #f5f5f5;
+  display: flex;
+  flex-direction: column;
+  font-size: 11px;
+  overflow: hidden;
+}
+
+.wf-propgrid-toolbar {
+  display: flex;
+  gap: 2px;
+  padding: 3px 4px;
+  background: linear-gradient(#fbfbfb, #e4e4e4);
+  border-bottom: 1px solid #c0c0c0;
+}
+
+.wf-propgrid-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid transparent;
+  cursor: default;
+}
+
+.wf-propgrid-btn:hover {
+  border-color: #8db2e3;
+  background: #dcebff;
+}
+
+.wf-propgrid-body {
+  flex: 1;
+  overflow: auto;
+  background: #ffffff;
+}
+
+.wf-propgrid-cat {
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.wf-propgrid-cat-header {
+  background: #ececec;
+  padding: 3px 6px;
+  font-weight: 600;
+  color: #333;
+  border-bottom: 1px solid #d0d0d0;
+}
+
+.wf-propgrid-row {
+  display: grid;
+  grid-template-columns: 45% 55%;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.wf-propgrid-name {
+  padding: 2px 6px;
+  color: #000;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wf-propgrid-val {
+  padding: 2px 6px;
+  color: #666;
+  background: #fafafa;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wf-webbrowser {
+  box-sizing: border-box;
+  border: 1px solid #717171;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.wf-webbrowser-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: linear-gradient(#fafafa, #e8e8e8);
+  border-bottom: 1px solid #c0c0c0;
+}
+
+.wf-webbrowser-back,
+.wf-webbrowser-fwd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid #b0b0b0;
+  background: #fff;
+  color: #444;
+  cursor: default;
+}
+
+.wf-webbrowser-url {
+  flex: 1;
+  border: 1px solid #a0a0a0;
+  padding: 2px 6px;
+  font: inherit;
+  font-size: 11px;
+  background: #fff;
+}
+
+.wf-webbrowser-content {
+  flex: 1;
   display: grid;
   place-items: center;
-  background:
-    linear-gradient(90deg, transparent 31px, #e9e9e9 32px),
-    linear-gradient(transparent 31px, #e9e9e9 32px),
-    #f8f8f8;
-  background-size: 32px 32px;
-  color: #555;
+  color: #888;
+  font-size: 12px;
+  background: #fff;
 }
 
 .wf-scrollbar {

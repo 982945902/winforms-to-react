@@ -60,7 +60,10 @@ const SUPPORTED_CONTROLS = new Set([
   "NumericUpDown",
   "Panel",
   "PictureBox",
+  "PrintPreviewControl",
   "ProgressBar",
+  "PropertyGrid",
+  "PropertyGridExtended",
   "RadioButton",
   "RichTextBox",
   "SplitContainer",
@@ -84,18 +87,15 @@ const SUPPORTED_CONTROLS = new Set([
   "ToolStripTextBox",
   "TrackBar",
   "TreeView",
-  "VScrollBar"
+  "VScrollBar",
+  "WebBrowser"
 ]);
 
 const DEGRADED_CONTROLS = new Set([
   "Chart",
   "ErrorProvider",
-  "PrintPreviewControl",
-  "PropertyGrid",
-  "PropertyGridExtended",
   "Timer",
-  "ToolTip",
-  "WebBrowser"
+  "ToolTip"
 ]);
 
 const NON_CONTROL_KINDS = new Set([
@@ -590,6 +590,18 @@ function assignControlProperty(control: MutableControl, property: string, value:
     case "SizeMode":
       control.appearance.sizeMode = String(value ?? "");
       break;
+    case "Rows":
+      if (typeof value === "number") control.appearance.rows = value;
+      break;
+    case "Zoom":
+      if (typeof value === "number") control.appearance.zoom = value;
+      break;
+    case "AutoZoom":
+      if (typeof value === "boolean") control.appearance.autoZoom = value;
+      break;
+    case "Url":
+      control.appearance.url = parseUri(value);
+      break;
     case "BackgroundColor":
     case "GridColor":
       control.properties[property] = parseColor(value);
@@ -991,7 +1003,8 @@ const VISUAL_PROPERTIES = new Set([
   "Padding",
   "Margin",
   "MaximumSize",
-  "MinimumSize"
+  "MinimumSize",
+  "Url"
 ]);
 
 function isVisualProperty(property: string): boolean {
@@ -1126,6 +1139,14 @@ function knownColorToCss(name: string): string | undefined {
     GradientInactiveCaption: "#dcdcdc"
   };
   return map[name];
+}
+
+// Parse `new System.Uri("https://...", System.UriKind.Absolute)` into a URL string.
+function parseUri(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  const m = raw.match(/new\s+(?:System\.)?Uri\s*\(\s*"([^"]+)"/);
+  if (m) return m[1];
+  return raw;
 }
 
 function toVisualSize(value: unknown): VisualSize | undefined {

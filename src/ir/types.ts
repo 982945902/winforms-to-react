@@ -112,6 +112,12 @@ export type VisualAppearance = {
   mask?: string;
   imageLocation?: string;
   sizeMode?: string;
+  // PrintPreviewControl
+  rows?: number;
+  zoom?: number;
+  autoZoom?: boolean;
+  // WebBrowser
+  url?: string;
   checkAlign?: VisualContentAlignment;
   imageAlign?: VisualContentAlignment;
   appearanceStyle?: string;
