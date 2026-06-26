@@ -211,6 +211,7 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
   applyControlHierarchy(stripped, controls, form);
   applyToolStripHierarchy(stripped, controls);
   applySplitContainer(stripped, controls);
+  applyToolStripContainerPanels(stripped, controls);
   applyNestedControlProperties(stripped, controls);
 
   // Resolve custom control kinds to known WinForms base kinds so the renderer
@@ -944,6 +945,41 @@ function applySplitContainer(source: string, controls: Map<string, MutableContro
   }
 }
 
+// ToolStripContainer exposes 4 edge panels (Top/Bottom/Left/Right) and a
+// ContentPanel. Designer writes `this.tsc.TopToolStripPanel.Controls.Add(x)`
+// and `this.tsc.ContentPanel.Controls.Add(y)`. Collect per-panel child lists so
+// the renderer can place them in the correct region.
+function applyToolStripContainerPanels(source: string, controls: Map<string, MutableControl>) {
+  for (const control of controls.values()) {
+    if (control.kind !== "ToolStripContainer") continue;
+
+    const panels: Array<["topToolStripChildren" | "bottomToolStripChildren" | "leftToolStripChildren" | "rightToolStripChildren" | "contentPanelChildren", string]> = [
+      ["topToolStripChildren", "TopToolStripPanel"],
+      ["bottomToolStripChildren", "BottomToolStripPanel"],
+      ["leftToolStripChildren", "LeftToolStripPanel"],
+      ["rightToolStripChildren", "RightToolStripPanel"],
+      ["contentPanelChildren", "ContentPanel"]
+    ];
+    const allNames: string[] = [];
+    for (const [field, panelName] of panels) {
+      const arr: string[] = [];
+      const pat = new RegExp(
+        `(?:this\\.)?${control.name}\\.${panelName}\\.Controls\\.Add\\(\\s*(?:this\\.)?([A-Za-z_]\\w*)\\s*\\)`,
+        "g"
+      );
+      for (const m of source.matchAll(pat)) arr.push(m[1]);
+      if (arr.length) {
+        (control as MutableControl)[field] = arr;
+        allNames.push(...arr);
+      }
+    }
+    if (allNames.length) {
+      const used = new Set(allNames);
+      control.children = control.children.filter((child) => !used.has(child.name));
+    }
+  }
+}
+
 function parseValue(raw: string): unknown {
   const value = raw.trim().replace(/\r?\n/g, " ");
 
@@ -1340,6 +1376,14 @@ function resolveControlKind(control: MutableControl, baseKindMap: Map<string, st
   if (resolved === "Control") {
     const inferred = inferKindFromName(control.kind);
     if (inferred !== control.kind && inferred !== "Control") resolved = inferred;
+  }
+  // If completely unresolved (not a known kind and no inheritance mapping),
+  // the control is a custom visual control that was instantiated and added to
+  // the visual tree. Default to UserControl (the most common base for custom
+  // WinForms controls with no explicit base class). This must NOT trigger for
+  // controls that are already known supported/degraded kinds.
+  if (!SUPPORTED_CONTROLS.has(resolved) && !DEGRADED_CONTROLS.has(resolved) && resolved === control.kind) {
+    resolved = "UserControl";
   }
   if (resolved !== control.kind) {
     if (!control.properties.originalKind) control.properties.originalKind = control.kind;

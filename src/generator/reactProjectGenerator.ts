@@ -355,6 +355,11 @@ export type VisualControl = {
   wrapContents?: boolean;
   panel1Children?: string[];
   panel2Children?: string[];
+  topToolStripChildren?: string[];
+  bottomToolStripChildren?: string[];
+  leftToolStripChildren?: string[];
+  rightToolStripChildren?: string[];
+  contentPanelChildren?: string[];
   orientation?: string;
   splitterDistance?: number;
   items?: string[];
@@ -558,7 +563,6 @@ function WinControl({ control, hostStyle }: { control: VisualControl; hostStyle?
       return <fieldset className="wf-group" style={style}><legend>{label}</legend>{children.map((child, index) => <WinControl key={child.name} control={child} hostStyle={childStyles[index]} />)}</fieldset>;
     case "Panel":
     case "TabPage":
-    case "ToolStripContainer":
     case "UserControl":
       return <div className="wf-panel" style={style}>{children.map((child, index) => <WinControl key={child.name} control={child} hostStyle={childStyles[index]} />)}</div>;
     case "FlowLayoutPanel":
@@ -567,6 +571,8 @@ function WinControl({ control, hostStyle }: { control: VisualControl; hostStyle?
       return <WinTableLayoutPanel control={control} style={style} />;
     case "SplitContainer":
       return <WinSplitContainer control={control} style={style} />;
+    case "ToolStripContainer":
+      return <WinToolStripContainer control={control} style={style} />;
     case "Splitter":
       return <div className="wf-splitter" style={style} />;
     case "TabControl":
@@ -719,6 +725,44 @@ function WinSplitContainer({ control, style }: { control: VisualControl; style: 
       <div className="wf-split-panel" style={panel1Style}>{p1.map((c) => <WinControl key={c.name} control={c} />)}</div>
       <div className="wf-splitter-bar" aria-hidden="true" />
       <div className="wf-split-panel" style={panel2Style}>{p2.map((c) => <WinControl key={c.name} control={c} />)}{rest.map((c) => <WinControl key={c.name} control={c} />)}</div>
+    </div>
+  );
+}
+
+// ToolStripContainer: 4 edge panels (Top/Bottom/Left/Right) + center ContentPanel.
+// Children are distributed to the panel they were added to in the Designer.
+function WinToolStripContainer({ control, style }: { control: VisualControl; style: CSSProperties }) {
+  const all = control.children ?? [];
+  const topNames = new Set(control.topToolStripChildren ?? []);
+  const bottomNames = new Set(control.bottomToolStripChildren ?? []);
+  const leftNames = new Set(control.leftToolStripChildren ?? []);
+  const rightNames = new Set(control.rightToolStripChildren ?? []);
+  const contentNames = new Set(control.contentPanelChildren ?? []);
+  const pick = (names: Set<string>) => all.filter((c) => names.has(c.name));
+  const top = pick(topNames);
+  const bottom = pick(bottomNames);
+  const left = pick(leftNames);
+  const right = pick(rightNames);
+  const content = pick(contentNames);
+  const rest = all.filter((c) => !topNames.has(c.name) && !bottomNames.has(c.name) && !leftNames.has(c.name) && !rightNames.has(c.name) && !contentNames.has(c.name));
+  const containerStyle: CSSProperties = { ...style, display: grid, gridTemplateRows: "auto 1fr auto", gridTemplateColumns: "auto 1fr auto" };
+  return (
+    <div className="wf-panel wf-tsc" style={containerStyle}>
+      <div className="wf-tsc-top" style={{ gridColumn: "1 / 4", display: "flex", flexWrap: "wrap", gap: "2px", padding: "2px", background: "linear-gradient(#fafafa,#e5e5e5)", borderBottom: "1px solid #c0c0c0" }}>
+        {top.map((c) => <WinControl key={c.name} control={c} />)}
+      </div>
+      <div className="wf-tsc-left" style={{ display: "flex", flexDirection: "column", gap: "2px", padding: "2px", background: "linear-gradient(#fafafa,#e5e5e5)", borderRight: "1px solid #c0c0c0" }}>
+        {left.map((c) => <WinControl key={c.name} control={c} />)}
+      </div>
+      <div className="wf-tsc-content" style={{ position: "relative", overflow: "auto", background: "#f0f0f0" }}>
+        {content.map((c) => <WinControl key={c.name} control={c} />)}{rest.map((c) => <WinControl key={c.name} control={c} />)}
+      </div>
+      <div className="wf-tsc-right" style={{ display: "flex", flexDirection: "column", gap: "2px", padding: "2px", background: "linear-gradient(#fafafa,#e5e5e5)", borderLeft: "1px solid #c0c0c0" }}>
+        {right.map((c) => <WinControl key={c.name} control={c} />)}
+      </div>
+      <div className="wf-tsc-bottom" style={{ gridColumn: "1 / 4", display: "flex", flexWrap: "wrap", gap: "2px", padding: "2px", background: "linear-gradient(#fafafa,#e5e5e5)", borderTop: "1px solid #c0c0c0" }}>
+        {bottom.map((c) => <WinControl key={c.name} control={c} />)}
+      </div>
     </div>
   );
 }

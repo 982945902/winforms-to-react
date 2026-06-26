@@ -143,6 +143,12 @@ export type VisualControl = {
   // SplitContainer: which child controls belong to Panel1 vs Panel2.
   panel1Children?: string[];
   panel2Children?: string[];
+  // ToolStripContainer: child controls per panel.
+  topToolStripChildren?: string[];
+  bottomToolStripChildren?: string[];
+  leftToolStripChildren?: string[];
+  rightToolStripChildren?: string[];
+  contentPanelChildren?: string[];
   orientation?: string;
   splitterDistance?: number;
   items?: string[];
