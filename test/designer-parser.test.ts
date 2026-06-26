@@ -428,3 +428,410 @@ describe("parseDesignerSource modern Designer syntax", () => {
     });
   });
 });
+
+const COMMENT_FORM = `
+partial class CommentForm
+{
+    private System.Windows.Forms.Button button1;
+    // this.button1.Text = "CommentedOut";
+    private System.Windows.Forms.Label label1;
+
+    private void InitializeComponent()
+    {
+        this.button1 = new System.Windows.Forms.Button();
+        this.label1 = new System.Windows.Forms.Label();
+        /* this.label1.Text = "BlockCommented"; */
+        this.button1.Text = "Save";
+        this.label1.Text = "Real";
+        // this.Controls.Add(this.button1);
+        this.Controls.Add(this.label1);
+        this.Controls.Add(this.button1);
+        this.ClientSize = new System.Drawing.Size(200, 100);
+        this.Text = "Comments";
+    }
+}
+`;
+
+describe("parseDesignerSource comment stripping", () => {
+  it("ignores single-line and block comments so only live assignments apply", () => {
+    const result = parseDesignerSource(COMMENT_FORM, {
+      sourcePath: "CommentForm.Designer.cs"
+    });
+
+    expect(result.controlsByName.get("button1")?.text).toBe("Save");
+    expect(result.controlsByName.get("label1")?.text).toBe("Real");
+    expect(result.form.controls.map((control) => control.name)).toEqual([
+      "label1",
+      "button1"
+    ]);
+  });
+});
+
+const VISUAL_PROPERTIES_FORM = `
+partial class VisualForm
+{
+    private System.Windows.Forms.Label label1;
+    private System.Windows.Forms.Button button1;
+    private System.Windows.Forms.TextBox textBox1;
+    private System.Windows.Forms.Panel panel1;
+
+    private void InitializeComponent()
+    {
+        this.label1 = new System.Windows.Forms.Label();
+        this.button1 = new System.Windows.Forms.Button();
+        this.textBox1 = new System.Windows.Forms.TextBox();
+        this.panel1 = new System.Windows.Forms.Panel();
+        this.label1.Font = new System.Drawing.Font("Segoe UI", 14F, System.Drawing.FontStyle.Bold | System.Drawing.FontStyle.Italic);
+        this.label1.ForeColor = System.Drawing.Color.Red;
+        this.label1.BackColor = System.Drawing.Color.FromArgb(200, 220, 240);
+        this.label1.TextAlign = System.Drawing.ContentAlignment.MiddleCenter;
+        this.label1.BorderStyle = System.Windows.Forms.BorderStyle.Fixed3D;
+        this.label1.Enabled = false;
+        this.label1.Visible = false;
+        this.label1.Location = new System.Drawing.Point(8, 8);
+        this.label1.Size = new System.Drawing.Size(120, 24);
+        this.label1.Text = "Hello";
+        this.button1.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+        this.button1.Location = new System.Drawing.Point(8, 40);
+        this.button1.Size = new System.Drawing.Size(80, 28);
+        this.button1.Text = "OK";
+        this.textBox1.Location = new System.Drawing.Point(8, 76);
+        this.textBox1.Size = new System.Drawing.Size(160, 20);
+        this.panel1.Dock = System.Windows.Forms.DockStyle.Fill;
+        this.panel1.Padding = new System.Windows.Forms.Padding(4, 8, 4, 8);
+        this.panel1.Location = new System.Drawing.Point(0, 100);
+        this.panel1.Size = new System.Drawing.Size(200, 60);
+        this.panel1.Controls.Add(this.textBox1);
+        this.ClientSize = new System.Drawing.Size(200, 160);
+        this.Controls.Add(this.panel1);
+        this.Controls.Add(this.button1);
+        this.Controls.Add(this.label1);
+        this.Text = "Visual";
+    }
+}
+`;
+
+describe("parseDesignerSource visual properties", () => {
+  it("captures font, colors, alignment, border style, enabled/visible, flat style and padding", () => {
+    const result = parseDesignerSource(VISUAL_PROPERTIES_FORM, {
+      sourcePath: "VisualForm.Designer.cs"
+    });
+
+    const label = result.controlsByName.get("label1");
+    expect(label?.appearance.font).toEqual({
+      family: "Segoe UI",
+      size: 14,
+      bold: true,
+      italic: true
+    });
+    expect(label?.appearance.foreColor).toEqual({ cssColor: "#ff0000", name: "Red" });
+    expect(label?.appearance.backColor).toEqual({ cssColor: "rgb(200, 220, 240)" });
+    expect(label?.appearance.textAlign).toEqual({ horizontal: "Center", vertical: "Middle" });
+    expect(label?.appearance.borderStyle).toBe("Fixed3D");
+    expect(label?.appearance.enabled).toBe(false);
+    expect(label?.appearance.visible).toBe(false);
+
+    const button = result.controlsByName.get("button1");
+    expect(button?.appearance.flatStyle).toBe("Flat");
+
+    const panel = result.controlsByName.get("panel1");
+    expect(panel?.dock).toBe("Fill");
+    expect(panel?.appearance.padding).toEqual({ left: 4, top: 8, right: 4, bottom: 8 });
+  });
+});
+
+const LAYOUT_FORM = `
+partial class LayoutForm
+{
+    private System.Windows.Forms.Panel anchorPanel;
+    private System.Windows.Forms.TableLayoutPanel tlp1;
+    private System.Windows.Forms.FlowLayoutPanel flp1;
+    private System.Windows.Forms.SplitContainer split1;
+    private System.Windows.Forms.ListView lv1;
+    private System.Windows.Forms.ColumnHeader colHeader1;
+    private System.Windows.Forms.MaskedTextBox masked1;
+    private System.Windows.Forms.PictureBox pic1;
+    private System.Windows.Forms.Button button1;
+    private System.Windows.Forms.Button button2;
+
+    private void InitializeComponent()
+    {
+        this.anchorPanel = new System.Windows.Forms.Panel();
+        this.tlp1 = new System.Windows.Forms.TableLayoutPanel();
+        this.flp1 = new System.Windows.Forms.FlowLayoutPanel();
+        this.split1 = new System.Windows.Forms.SplitContainer();
+        this.lv1 = new System.Windows.Forms.ListView();
+        this.colHeader1 = new System.Windows.Forms.ColumnHeader();
+        this.masked1 = new System.Windows.Forms.MaskedTextBox();
+        this.pic1 = new System.Windows.Forms.PictureBox();
+        this.button1 = new System.Windows.Forms.Button();
+        this.button2 = new System.Windows.Forms.Button();
+        this.tlp1.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50F));
+        this.tlp1.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 50F));
+        this.tlp1.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Absolute, 40F));
+        this.tlp1.RowStyles.Add(new System.Windows.Forms.RowStyle(System.Windows.Forms.SizeType.Percent, 100F));
+        this.tlp1.Controls.Add(this.button1, 0, 0);
+        this.tlp1.Controls.Add(this.button2, 1, 1);
+        this.anchorPanel.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top
+            | System.Windows.Forms.AnchorStyles.Bottom)
+            | System.Windows.Forms.AnchorStyles.Left)
+            | System.Windows.Forms.AnchorStyles.Right)));
+        this.anchorPanel.Location = new System.Drawing.Point(10, 10);
+        this.anchorPanel.Size = new System.Drawing.Size(100, 80);
+        this.flp1.FlowDirection = System.Windows.Forms.FlowDirection.TopDown;
+        this.flp1.WrapContents = false;
+        this.flp1.Controls.Add(this.button1);
+        this.flp1.Location = new System.Drawing.Point(10, 100);
+        this.flp1.Size = new System.Drawing.Size(120, 80);
+        this.split1.Orientation = System.Windows.Forms.Orientation.Horizontal;
+        this.split1.SplitterDistance = 60;
+        this.split1.Panel1.Controls.Add(this.button1);
+        this.split1.Panel2.Controls.Add(this.button2);
+        this.split1.Location = new System.Drawing.Point(10, 190);
+        this.split1.Size = new System.Drawing.Size(140, 100);
+        this.lv1.View = System.Windows.Forms.View.Details;
+        this.lv1.Columns.AddRange(new System.Windows.Forms.ColumnHeader[] { this.colHeader1 });
+        this.lv1.Location = new System.Drawing.Point(160, 10);
+        this.lv1.Size = new System.Drawing.Size(120, 80);
+        this.colHeader1.Text = "Name";
+        this.colHeader1.Width = 100;
+        this.masked1.Mask = "00/00/0000";
+        this.masked1.Location = new System.Drawing.Point(160, 100);
+        this.masked1.Size = new System.Drawing.Size(100, 23);
+        this.pic1.ImageLocation = "logo.png";
+        this.pic1.SizeMode = System.Windows.Forms.PictureBoxSizeMode.Zoom;
+        this.pic1.Location = new System.Drawing.Point(160, 130);
+        this.pic1.Size = new System.Drawing.Size(80, 60);
+        this.button1.Text = "A";
+        this.button2.Text = "B";
+        this.ClientSize = new System.Drawing.Size(300, 300);
+        this.Controls.Add(this.pic1);
+        this.Controls.Add(this.masked1);
+        this.Controls.Add(this.lv1);
+        this.Controls.Add(this.split1);
+        this.Controls.Add(this.flp1);
+        this.Controls.Add(this.tlp1);
+        this.Controls.Add(this.anchorPanel);
+        this.Text = "Layout";
+    }
+}
+`;
+
+describe("parseDesignerSource layout and advanced controls", () => {
+  it("captures anchor, table layout, flow direction, split panels, listview columns, mask, image", () => {
+    const result = parseDesignerSource(LAYOUT_FORM, {
+      sourcePath: "LayoutForm.Designer.cs"
+    });
+
+    const anchor = result.controlsByName.get("anchorPanel");
+    expect(anchor?.anchor).toEqual(["Top", "Bottom", "Left", "Right"]);
+
+    const tlp = result.controlsByName.get("tlp1");
+    expect(tlp?.tableLayout?.columns).toEqual([
+      { type: "Percent", value: 50 },
+      { type: "Percent", value: 50 }
+    ]);
+    expect(tlp?.tableLayout?.rows).toEqual([
+      { type: "Absolute", value: 40 },
+      { type: "Percent", value: 100 }
+    ]);
+    expect(tlp?.tableLayout?.cells).toEqual({ button1: [0, 0], button2: [1, 1] });
+
+    const flp = result.controlsByName.get("flp1");
+    expect(flp?.flowDirection).toBe("TopDown");
+    expect(flp?.wrapContents).toBe(false);
+
+    const split = result.controlsByName.get("split1");
+    expect(split?.orientation).toBe("Horizontal");
+    expect(split?.splitterDistance).toBe(60);
+    expect(split?.panel1Children).toEqual(["button1"]);
+    expect(split?.panel2Children).toEqual(["button2"]);
+
+    const lv = result.controlsByName.get("lv1");
+    expect(lv?.appearance?.view).toBe("Details");
+    expect(lv?.columns).toEqual([{ name: "colHeader1", headerText: "Name", width: 100, kind: "ColumnHeader" }]);
+
+    const masked = result.controlsByName.get("masked1");
+    expect(masked?.appearance?.mask).toBe("00/00/0000");
+
+    const pic = result.controlsByName.get("pic1");
+    expect(pic?.appearance?.imageLocation).toBe("logo.png");
+    expect(pic?.appearance?.sizeMode).toBe("Zoom");
+  });
+});
+
+const STATE_FORM = `
+partial class StateForm
+{
+    private System.Windows.Forms.CheckBox check1;
+    private System.Windows.Forms.TextBox txt1;
+    private System.Windows.Forms.ComboBox combo1;
+    private System.Windows.Forms.TrackBar track1;
+    private System.Windows.Forms.ProgressBar prog1;
+    private System.Windows.Forms.NumericUpDown num1;
+    private System.Windows.Forms.DateTimePicker dtp1;
+
+    private void InitializeComponent()
+    {
+        this.check1 = new System.Windows.Forms.CheckBox();
+        this.txt1 = new System.Windows.Forms.TextBox();
+        this.combo1 = new System.Windows.Forms.ComboBox();
+        this.track1 = new System.Windows.Forms.TrackBar();
+        this.prog1 = new System.Windows.Forms.ProgressBar();
+        this.num1 = new System.Windows.Forms.NumericUpDown();
+        this.dtp1 = new System.Windows.Forms.DateTimePicker();
+        this.check1.Checked = true;
+        this.check1.ThreeState = true;
+        this.txt1.Multiline = true;
+        this.txt1.ReadOnly = true;
+        this.txt1.MaxLength = 200;
+        this.txt1.ScrollBars = System.Windows.Forms.ScrollBars.Vertical;
+        this.combo1.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+        this.combo1.SelectedIndex = 1;
+        this.track1.Value = 30;
+        this.track1.Minimum = 0;
+        this.track1.Maximum = 100;
+        this.prog1.Value = 50;
+        this.prog1.Minimum = 0;
+        this.prog1.Maximum = 100;
+        this.num1.Value = 5;
+        this.num1.Minimum = 0;
+        this.num1.Maximum = 100;
+        this.dtp1.Format = System.Windows.Forms.DateTimePickerFormat.Short;
+        this.dtp1.Value = System.DateTime.Now;
+        this.check1.Text = "Agree";
+        this.txt1.Text = "Content";
+        this.combo1.Items.AddRange(new object[] { "A", "B", "C" });
+        this.check1.Location = new System.Drawing.Point(8, 8);
+        this.txt1.Location = new System.Drawing.Point(8, 32);
+        this.txt1.Size = new System.Drawing.Size(120, 60);
+        this.combo1.Location = new System.Drawing.Point(8, 100);
+        this.track1.Location = new System.Drawing.Point(8, 130);
+        this.prog1.Location = new System.Drawing.Point(8, 170);
+        this.prog1.Size = new System.Drawing.Size(120, 20);
+        this.num1.Location = new System.Drawing.Point(8, 196);
+        this.dtp1.Location = new System.Drawing.Point(8, 222);
+        this.ClientSize = new System.Drawing.Size(160, 260);
+        this.Controls.Add(this.dtp1);
+        this.Controls.Add(this.num1);
+        this.Controls.Add(this.prog1);
+        this.Controls.Add(this.track1);
+        this.Controls.Add(this.combo1);
+        this.Controls.Add(this.txt1);
+        this.Controls.Add(this.check1);
+        this.Text = "State";
+    }
+}
+`;
+
+describe("parseDesignerSource control state properties", () => {
+  it("captures checked, readonly, multiline, dropdown style, value/min/max, format", () => {
+    const result = parseDesignerSource(STATE_FORM, {
+      sourcePath: "StateForm.Designer.cs"
+    });
+
+    const check = result.controlsByName.get("check1");
+    expect(check?.appearance?.checked).toBe(true);
+    expect(check?.appearance?.threeState).toBe(true);
+
+    const txt = result.controlsByName.get("txt1");
+    expect(txt?.appearance?.multiline).toBe(true);
+    expect(txt?.appearance?.readOnly).toBe(true);
+    expect(txt?.appearance?.maxLength).toBe(200);
+    expect(txt?.appearance?.scrollBars).toBe("Vertical");
+
+    const combo = result.controlsByName.get("combo1");
+    expect(combo?.appearance?.dropDownStyle).toBe("DropDownList");
+    expect(combo?.appearance?.selectedIndex).toBe(1);
+    expect(combo?.items).toEqual(["A", "B", "C"]);
+
+    const track = result.controlsByName.get("track1");
+    expect(track?.appearance?.value).toBe(30);
+    expect(track?.appearance?.minimum).toBe(0);
+    expect(track?.appearance?.maximum).toBe(100);
+
+    const prog = result.controlsByName.get("prog1");
+    expect(prog?.appearance?.value).toBe(50);
+    expect(prog?.appearance?.maximum).toBe(100);
+
+    const num = result.controlsByName.get("num1");
+    expect(num?.appearance?.value).toBe(5);
+
+    const dtp = result.controlsByName.get("dtp1");
+    expect(dtp?.appearance?.format).toBe("Short");
+  });
+});
+
+const FORM_PROPERTIES_SOURCE = `
+partial class FormPropsForm
+{
+    private void InitializeComponent()
+    {
+        this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedSingle;
+        this.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
+        this.WindowState = System.Windows.Forms.FormWindowState.Maximized;
+        this.Opacity = 0.8;
+        this.AcceptButton = this.okButton;
+        this.ClientSize = new System.Drawing.Size(200, 100);
+        this.Text = "Props";
+    }
+    private System.Windows.Forms.Button okButton;
+}
+`;
+
+describe("parseDesignerSource form-level properties", () => {
+  it("captures border style, start position, window state, opacity, accept button", () => {
+    const result = parseDesignerSource(FORM_PROPERTIES_SOURCE, {
+      sourcePath: "FormPropsForm.Designer.cs"
+    });
+
+    expect(result.form.formBorderStyle).toBe("FixedSingle");
+    expect(result.form.startPosition).toBe("CenterParent");
+    expect(result.form.windowState).toBe("Maximized");
+    expect(result.form.opacity).toBe(0.8);
+    expect(result.form.acceptButton).toBe("okButton");
+  });
+});
+
+const GRID_NESTED_SOURCE = `
+partial class GridNestedForm
+{
+    private System.Windows.Forms.DataGridView grid1;
+    private System.Windows.Forms.DataGridViewTextBoxColumn col1;
+
+    private void InitializeComponent()
+    {
+        this.grid1 = new System.Windows.Forms.DataGridView();
+        this.col1 = new System.Windows.Forms.DataGridViewTextBoxColumn();
+        this.grid1.Columns.AddRange(new System.Windows.Forms.DataGridViewColumn[] { this.col1 });
+        this.grid1.BackgroundColor = System.Drawing.Color.FromArgb(240, 240, 240);
+        this.grid1.GridColor = System.Drawing.Color.DarkGray;
+        this.grid1.DefaultCellStyle.SelectionBackColor = System.Drawing.Color.FromArgb(0, 120, 215);
+        this.grid1.ColumnHeadersDefaultCellStyle.BackColor = System.Drawing.Color.FromArgb(230, 230, 230);
+        this.grid1.AlternatingRowsDefaultCellStyle.BackColor = System.Drawing.Color.FromArgb(245, 245, 245);
+        this.col1.HeaderText = "Name";
+        this.col1.Width = 100;
+        this.grid1.Location = new System.Drawing.Point(8, 8);
+        this.grid1.Size = new System.Drawing.Size(200, 120);
+        this.ClientSize = new System.Drawing.Size(220, 140);
+        this.Controls.Add(this.grid1);
+        this.Text = "Grid";
+    }
+}
+`;
+
+describe("parseDesignerSource DataGridView nested style properties", () => {
+  it("captures background, grid color, selection and alternating row colors via nested assignment", () => {
+    const result = parseDesignerSource(GRID_NESTED_SOURCE, {
+      sourcePath: "GridNestedForm.Designer.cs"
+    });
+
+    const grid = result.controlsByName.get("grid1");
+    expect((grid?.properties["BackgroundColor"] as { cssColor: string })?.cssColor).toBe("rgb(240, 240, 240)");
+    expect((grid?.properties["GridColor"] as { cssColor: string })?.cssColor).toBe("#a9a9a9");
+    expect((grid?.properties["DefaultCellStyle.SelectionBackColor"] as { cssColor: string })?.cssColor).toBe("rgb(0, 120, 215)");
+    expect((grid?.properties["ColumnHeadersDefaultCellStyle.BackColor"] as { cssColor: string })?.cssColor).toBe("rgb(230, 230, 230)");
+    expect((grid?.properties["AlternatingRowsDefaultCellStyle.BackColor"] as { cssColor: string })?.cssColor).toBe("rgb(245, 245, 245)");
+    expect(grid?.columns).toEqual([{ name: "col1", headerText: "Name", width: 100, kind: "DataGridViewTextBoxColumn" }]);
+  });
+});

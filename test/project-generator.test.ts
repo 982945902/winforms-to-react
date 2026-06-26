@@ -190,4 +190,122 @@ describe("generateReactProject", () => {
       await rm(outDir, { recursive: true, force: true });
     }
   });
+
+  it("emits a Dock-aware compatibility renderer that reserves edges and fills the remainder", async () => {
+    const outDir = await mkdtemp(join(tmpdir(), "wf2react-dock-"));
+    const form: VisualForm = {
+      kind: "Form",
+      name: "DockForm",
+      sourcePath: "DockForm.Designer.cs",
+      text: "Dock",
+      clientSize: { width: 400, height: 300 },
+      support: {
+        controlsConverted: 3,
+        supportedControls: ["MenuStrip", "Panel", "StatusStrip"],
+        degradedControls: [],
+        unknownControls: [],
+        controlCoverage: {
+          total: 3,
+          supported: 3,
+          degraded: 0,
+          unknown: 0,
+          supportedPercent: 100,
+          previewablePercent: 100,
+          unknownPercent: 0,
+          byKind: [
+            { kind: "MenuStrip", count: 1, status: "supported" },
+            { kind: "Panel", count: 1, status: "supported" },
+            { kind: "StatusStrip", count: 1, status: "supported" }
+          ]
+        },
+        eventStubs: []
+      },
+      controls: [
+        {
+          kind: "MenuStrip",
+          name: "menuStrip1",
+          dock: "Top",
+          bounds: { x: 0, y: 0, width: 400, height: 24 },
+          properties: {},
+          events: [],
+          children: []
+        },
+        {
+          kind: "StatusStrip",
+          name: "statusStrip1",
+          dock: "Bottom",
+          bounds: { x: 0, y: 276, width: 400, height: 24 },
+          properties: {},
+          events: [],
+          children: []
+        },
+        {
+          kind: "Panel",
+          name: "contentPanel",
+          dock: "Fill",
+          bounds: { x: 0, y: 24, width: 400, height: 252 },
+          properties: {},
+          events: [],
+          children: []
+        }
+      ],
+      properties: {}
+    };
+
+    try {
+      await generateReactProject({
+        outDir,
+        forms: [form],
+        report: {
+          sourceFiles: ["DockForm.Designer.cs"],
+          forms: [
+            {
+              name: "DockForm",
+              title: "Dock",
+              sourcePath: "DockForm.Designer.cs",
+              support: form.support
+            }
+          ],
+          formsConverted: 1,
+          controlsConverted: 3,
+          supportedControls: ["MenuStrip", "Panel", "StatusStrip"],
+          degradedControls: [],
+          unknownControls: [],
+          controlCoverage: form.support.controlCoverage,
+          eventStubs: []
+        }
+      });
+
+      const compat = await readFile(join(outDir, "src", "winformsCompat.tsx"), "utf8");
+      expect(compat).toContain("function dockLayout");
+      expect(compat).toContain("dock === \"Top\"");
+      expect(compat).toContain("dock === \"Bottom\"");
+      expect(compat).toContain("dock === \"Left\"");
+      expect(compat).toContain("dock === \"Right\"");
+      expect(compat).toContain("dock === \"Fill\"");
+      expect(compat).toContain("fillIndices");
+      expect(compat).toContain("hostStyle");
+      expect(compat).toContain("isContainerKind");
+      expect(compat).toContain("function winStyle");
+      expect(compat).toContain("a.foreColor");
+      expect(compat).toContain("a.backColor");
+      expect(compat).toContain("a.font");
+      expect(compat).toContain("a.borderStyle");
+      expect(compat).toContain("a.textAlign");
+      expect(compat).toContain("a.enabled === false");
+      expect(compat).toContain("appearance?.visible === false");
+      expect(compat).toContain("function layoutChildren");
+      expect(compat).toContain("hasLeft && hasRight");
+      expect(compat).toContain("WinTableLayoutPanel");
+      expect(compat).toContain("WinFlowLayoutPanel");
+      expect(compat).toContain("WinSplitContainer");
+      expect(compat).toContain("wf-textarea");
+      expect(compat).toContain("wf-progress-bar");
+      expect(compat).toContain("wf-degraded");
+      expect(compat).toContain("wf-listview");
+      expect(compat).toContain("wf-tree-node");
+    } finally {
+      await rm(outDir, { recursive: true, force: true });
+    }
+  });
 });

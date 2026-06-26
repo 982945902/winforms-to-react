@@ -52,16 +52,50 @@ npm run dev
 
 The parser currently extracts:
 
-- form name, title, client size, and selected form properties
-- control declarations and instantiations
+- form name, title, client size, and form-level properties (`FormBorderStyle`,
+  `StartPosition`, `WindowState`, `Opacity`, `AcceptButton`, `CancelButton`,
+  `BackgroundImage`)
+- control declarations and instantiations (including target-typed `new()`)
 - absolute bounds from `Location` and `Size`
 - text, tab index, auto size, dock, anchor, and arbitrary fallback properties
+- visual appearance: `Font` (family/size/bold/italic/underline/strikeout),
+  `ForeColor`/`BackColor` (`Color`, `FromArgb`, `FromKnownColor`), `Enabled`,
+  `Visible`, `BorderStyle`, `TextAlign`, `ImageKey`/`Image`, `Padding`/`Margin`,
+  `RightToLeft`, `FlatStyle`, `MaximumSize`/`MinimumSize`
+- control state: `Checked`/`ThreeState`, `ReadOnly`, `Multiline`,
+  `PasswordChar`/`UseSystemPasswordChar`, `MaxLength`, `DropDownStyle`,
+  `SelectedIndex`, `Value`/`Minimum`/`Maximum`, `Format`, `WordWrap`,
+  `ScrollBars`, `CheckAlign`/`ImageAlign`, `Appearance`, `View`, `Mask`,
+  `ImageLocation`/`SizeMode`
+- layout metadata: `TableLayoutPanel` row/column styles and cell coordinates,
+  `FlowLayoutPanel` `FlowDirection`/`WrapContents`, `SplitContainer`
+  `Panel1`/`Panel2` grouping, `Orientation`, `SplitterDistance`
 - control hierarchy from `Controls.Add`
 - menu/tool/status strip hierarchy from `Items.AddRange` and `DropDownItems.AddRange`
-- `DataGridView` column definitions from `Columns.AddRange`
+- `DataGridView` column definitions from `Columns.AddRange` and nested style
+  properties (`BackgroundColor`, `GridColor`, `DefaultCellStyle.SelectionBackColor`,
+  `ColumnHeadersDefaultCellStyle`, `AlternatingRowsDefaultCellStyle`)
+- `ListView` `ColumnHeader` columns from `Columns.AddRange`
 - static list items from `Items.AddRange`, `Items.Add`, and simple `TreeNode`
   constructors
 - event handler stubs from common `+=` Designer patterns
+- C# comments (single-line and block) are stripped before scanning so
+  commented-out Designer lines are ignored
+
+The generated renderer applies:
+
+- Dock layout passes (Top/Bottom/Left/Right/Fill) with z-order edge reservation
+- Anchor layout (Left+Right stretches width, Top+Bottom stretches height)
+- `TableLayoutPanel` as CSS grid with percent/absolute/auto sizing
+- `FlowLayoutPanel` with `FlowDirection` and `WrapContents`
+- `SplitContainer` as two-panel splitter with `Orientation`/`SplitterDistance`
+- full visual appearance mapping (font, colors, borders, alignment, padding)
+- control state rendering (checked, readonly, multiline, password, dropdown,
+  value/min/max, mask placeholder, image location)
+- `DataGridView` with background/grid/selection/alternating row colors
+- `ListView` Details view with column headers
+- degraded placeholders for `PropertyGrid`/`WebBrowser`/`Chart` and nonvisual
+  components (`ErrorProvider`/`ToolTip`/`Timer`) are suppressed
 
 The migration report includes `controlCoverage`, which records:
 

@@ -6,11 +6,19 @@ import type {
   FormSupportSummary,
   MigrationReport,
   ParseResult,
+  VisualAppearance,
   VisualBounds,
+  VisualBorderStyle,
+  VisualColor,
   VisualColumn,
+  VisualContentAlignment,
   VisualControl,
+  VisualFont,
   VisualForm,
-  VisualSize
+  VisualPadding,
+  VisualSize,
+  VisualTableLayout,
+  VisualTableSizing
 } from "../ir/types.js";
 
 export type ParseDesignerOptions = {
@@ -25,6 +33,10 @@ type MutableColumn = VisualColumn & {
   typeName: string;
   properties: Record<string, unknown>;
 };
+
+function emptyAppearance(): VisualAppearance {
+  return {};
+}
 
 const SUPPORTED_CONTROLS = new Set([
   "BindingNavigator",
@@ -52,6 +64,7 @@ const SUPPORTED_CONTROLS = new Set([
   "RadioButton",
   "RichTextBox",
   "SplitContainer",
+  "Splitter",
   "StatusStrip",
   "TabControl",
   "TabPage",
@@ -91,7 +104,6 @@ const NON_CONTROL_KINDS = new Set([
   "ComponentResourceManager",
   "Container",
   "ContextMenuStrip",
-  "ColumnHeader",
   "Cursor",
   "FolderBrowserDialog",
   "FontDialog",
@@ -114,8 +126,9 @@ const NON_CONTROL_KINDS = new Set([
 ]);
 
 export function parseDesignerSource(source: string, options: ParseDesignerOptions): ParseResult {
-  const className = findClassName(source) ?? stripDesignerSuffix(options.sourcePath);
-  const fields = parseFieldTypes(source);
+  const stripped = stripComments(source);
+  const className = findClassName(stripped) ?? stripDesignerSuffix(options.sourcePath);
+  const fields = parseFieldTypes(stripped);
   const controls = new Map<string, MutableControl>();
   const columns = new Map<string, MutableColumn>();
 
@@ -136,6 +149,7 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
         kind,
         name,
         typeName,
+        appearance: emptyAppearance(),
         properties: {},
         events: [],
         children: []
@@ -143,7 +157,7 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
     }
   }
 
-  for (const [name, typeName] of parseInstantiations(source, fields)) {
+  for (const [name, typeName] of parseInstantiations(stripped, fields)) {
     const declaredType = fields.get(name);
     if (declaredType && !isDesignerComponentType(declaredType)) continue;
 
@@ -162,6 +176,7 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
         kind,
         name,
         typeName,
+        appearance: emptyAppearance(),
         properties: {},
         events: [],
         children: []
@@ -178,12 +193,15 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
     properties: {}
   };
 
-  applyPropertyAssignments(source, controls, columns, form);
-  applyEvents(source, controls);
-  applyColumns(source, controls, columns);
-  applyListItems(source, controls);
-  applyControlHierarchy(source, controls, form);
-  applyToolStripHierarchy(source, controls);
+  applyPropertyAssignments(stripped, controls, columns, form);
+  applyEvents(stripped, controls);
+  applyColumns(stripped, controls, columns);
+  applyListItems(stripped, controls);
+  applyTableLayout(stripped, controls);
+  applyControlHierarchy(stripped, controls, form);
+  applyToolStripHierarchy(stripped, controls);
+  applySplitContainer(stripped, controls);
+  applyNestedControlProperties(stripped, controls);
 
   if (form.controls.length === 0) {
     const childNames = new Set([...controls.values()].flatMap((control) => control.children.map((child) => child.name)));
@@ -280,6 +298,72 @@ function stripDesignerSuffix(sourcePath: string): string {
   return fileName.replace(/\.Designer\.cs$/i, "").replace(/\.cs$/i, "");
 }
 
+// Strip C# comments before regex scanning so commented-out Designer lines and
+// block-comment headers are not mistaken for live assignments. String literals
+// are preserved verbatim so semicolons or keywords inside them stay inert in
+// later passes (those passes stop on statement boundaries, not on quotes).
+function stripComments(source: string): string {
+  let result = "";
+  let i = 0;
+  const length = source.length;
+  while (i < length) {
+    const ch = source[i];
+    const next = source[i + 1];
+
+    if (ch === "/" && next === "/") {
+      const end = source.indexOf("\n", i + 2);
+      i = end === -1 ? length : end;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      const end = source.indexOf("*/", i + 2);
+      i = end === -1 ? length : end + 2;
+      continue;
+    }
+    if (ch === "@" && next === "\"") {
+      result += source.slice(i, i + 2);
+      i += 2;
+      while (i < length) {
+        if (source[i] === "\"") {
+          if (source[i + 1] === "\"") {
+            result += "\"\"";
+            i += 2;
+            continue;
+          }
+          result += "\"";
+          i += 1;
+          break;
+        }
+        result += source[i];
+        i += 1;
+      }
+      continue;
+    }
+    if (ch === "\"") {
+      result += "\"";
+      i += 1;
+      while (i < length) {
+        if (source[i] === "\\") {
+          result += source.slice(i, i + 2);
+          i += 2;
+          continue;
+        }
+        if (source[i] === "\"") {
+          result += "\"";
+          i += 1;
+          break;
+        }
+        result += source[i];
+        i += 1;
+      }
+      continue;
+    }
+    result += ch;
+    i += 1;
+  }
+  return result;
+}
+
 function parseFieldTypes(source: string): Map<string, string> {
   const fields = new Map<string, string>();
   const explicitPattern = /^\s*(?:private|protected|internal|public)\s+(?:global::)?([A-Za-z_][\w.<>]*)\s+([A-Za-z_]\w*)\s*;/gm;
@@ -326,17 +410,19 @@ function applyPropertyAssignments(
   for (const match of source.matchAll(controlPropertyPattern)) {
     const target = match[1];
     const property = match[2];
-    const value = parseValue(match[3]);
+    const rawValue = match[3];
     const control = controls.get(target);
     const column = columns.get(target);
 
     if (control) {
+      const value = isVisualProperty(property) ? rawValue : parseValue(rawValue);
       assignControlProperty(control, property, value);
       consumedRanges.push([match.index, match.index + match[0].length]);
       continue;
     }
 
     if (column) {
+      const value = parseValue(rawValue);
       assignColumnProperty(column, property, value);
       consumedRanges.push([match.index, match.index + match[0].length]);
     }
@@ -380,6 +466,134 @@ function assignControlProperty(control: MutableControl, property: string, value:
     case "Anchor":
       control.anchor = Array.isArray(value) ? value.map(String) : [String(value)];
       break;
+    case "Font":
+      control.appearance.font = parseFont(value);
+      break;
+    case "ForeColor":
+      control.appearance.foreColor = parseColor(value);
+      break;
+    case "BackColor":
+      control.appearance.backColor = parseColor(value);
+      break;
+    case "Enabled":
+      if (typeof value === "boolean") control.appearance.enabled = value;
+      break;
+    case "Visible":
+      if (typeof value === "boolean") control.appearance.visible = value;
+      break;
+    case "BorderStyle":
+      control.appearance.borderStyle = parseBorderStyle(value);
+      break;
+    case "TextAlign":
+      control.appearance.textAlign = parseContentAlignment(value);
+      break;
+    case "ImageKey":
+    case "ImageIndex":
+      control.appearance.imageKey = String(value ?? "");
+      break;
+    case "Image":
+      control.appearance.image = String(value ?? "");
+      break;
+    case "Padding":
+      control.appearance.padding = parsePadding(value);
+      break;
+    case "Margin":
+      control.appearance.margin = parsePadding(value);
+      break;
+    case "RightToLeft":
+      control.appearance.rightToLeft = value === "Yes" || value === "Inherit";
+      break;
+    case "MaximumSize":
+      control.appearance.maximumSize = toVisualSize(value);
+      break;
+    case "MinimumSize":
+      control.appearance.minimumSize = toVisualSize(value);
+      break;
+    case "FlatStyle":
+      control.appearance.flatStyle = String(value ?? "");
+      break;
+    case "FlowDirection":
+      control.flowDirection = String(value ?? "");
+      break;
+    case "WrapContents":
+      if (typeof value === "boolean") control.wrapContents = value;
+      break;
+    case "Orientation":
+      control.orientation = String(value ?? "");
+      break;
+    case "SplitterDistance":
+      if (typeof value === "number") control.splitterDistance = value;
+      break;
+    case "Checked":
+      if (typeof value === "boolean") control.appearance.checked = value;
+      break;
+    case "ThreeState":
+      if (typeof value === "boolean") control.appearance.threeState = value;
+      break;
+    case "ReadOnly":
+      if (typeof value === "boolean") control.appearance.readOnly = value;
+      break;
+    case "Multiline":
+      if (typeof value === "boolean") control.appearance.multiline = value;
+      break;
+    case "PasswordChar":
+      control.appearance.passwordChar = String(value ?? "");
+      break;
+    case "UseSystemPasswordChar":
+      if (value === true) control.appearance.passwordChar = "•";
+      break;
+    case "MaxLength":
+      if (typeof value === "number") control.appearance.maxLength = value;
+      break;
+    case "DropDownStyle":
+      control.appearance.dropDownStyle = String(value ?? "");
+      break;
+    case "SelectedIndex":
+      if (typeof value === "number") control.appearance.selectedIndex = value;
+      break;
+    case "Value":
+      control.appearance.value = typeof value === "number" ? value : String(value ?? "");
+      break;
+    case "Minimum":
+      if (typeof value === "number") control.appearance.minimum = value;
+      break;
+    case "Maximum":
+      if (typeof value === "number") control.appearance.maximum = value;
+      break;
+    case "Format":
+      control.appearance.format = String(value ?? "");
+      break;
+    case "WordWrap":
+      if (typeof value === "boolean") control.appearance.wordWrap = value;
+      break;
+    case "ScrollBars":
+      control.appearance.scrollBars = String(value ?? "");
+      break;
+    case "CheckAlign":
+      control.appearance.checkAlign = parseContentAlignment(value);
+      break;
+    case "ImageAlign":
+      control.appearance.imageAlign = parseContentAlignment(value);
+      break;
+    case "Appearance":
+      control.appearance.appearanceStyle = String(value ?? "");
+      break;
+    case "View":
+      control.appearance.view = String(value ?? "");
+      break;
+    case "Mask":
+      control.appearance.mask = String(value ?? "");
+      break;
+    case "ImageLocation":
+      control.appearance.imageLocation = String(value ?? "");
+      break;
+    case "SizeMode":
+      control.appearance.sizeMode = String(value ?? "");
+      break;
+    case "BackgroundColor":
+    case "GridColor":
+      control.properties[property] = parseColor(value);
+      break;
     default:
       control.properties[property] = value;
       break;
@@ -389,6 +603,7 @@ function assignControlProperty(control: MutableControl, property: string, value:
 function assignColumnProperty(column: MutableColumn, property: string, value: unknown) {
   switch (property) {
     case "HeaderText":
+    case "Text":
       column.headerText = typeof value === "string" ? value : String(value ?? "");
       break;
     case "Width":
@@ -416,6 +631,30 @@ function assignFormProperty(form: VisualForm, property: string, value: unknown) 
       break;
     case "Name":
       form.properties[property] = value;
+      break;
+    case "FormBorderStyle":
+      form.formBorderStyle = String(value ?? "");
+      break;
+    case "StartPosition":
+      form.startPosition = String(value ?? "");
+      break;
+    case "WindowState":
+      form.windowState = String(value ?? "");
+      break;
+    case "Opacity":
+      if (typeof value === "number") form.opacity = value;
+      break;
+    case "AcceptButton":
+      form.acceptButton = String(value ?? "");
+      break;
+    case "CancelButton":
+      form.cancelButton = String(value ?? "");
+      break;
+    case "Icon":
+      form.icon = String(value ?? "");
+      break;
+    case "BackgroundImage":
+      form.backgroundImage = String(value ?? "");
       break;
     default:
       form.properties[property] = value;
@@ -499,6 +738,62 @@ function appendItems(control: MutableControl, items: string[]) {
   control.items = [...(control.items ?? []), ...items];
 }
 
+// Collect TableLayoutPanel row/column styles and cell coordinates. Designer
+// emits RowStyles.Add/ColumnStyles.Add with RowStyle(SizeType.Percent, 50F) and
+// Controls.Add(child, column, row).
+function applyTableLayout(source: string, controls: Map<string, MutableControl>) {
+  for (const control of controls.values()) {
+    if (control.kind !== "TableLayoutPanel") continue;
+
+    const colStyles = parseTableSizing(source, control.name, "ColumnStyles");
+    const rowStyles = parseTableSizing(source, control.name, "RowStyles");
+    const cells: Record<string, [number, number]> = {};
+    const columnSpan: Record<string, number> = {};
+    const rowSpan: Record<string, number> = {};
+
+    const cellPattern = new RegExp(
+      `(?:this\\.)?${control.name}\\.Controls\\.Add\\(\\s*(?:this\\.)?([A-Za-z_]\\w*)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)\\s*\\)`,
+      "g"
+    );
+    for (const match of source.matchAll(cellPattern)) {
+      cells[match[1]] = [Number(match[2]), Number(match[3])];
+    }
+
+    const spanPattern = new RegExp(
+      `(?:this\\.)?${control.name}\\.SetColumnSpan\\(\\s*(?:this\\.)?([A-Za-z_]\\w*)\\s*,\\s*(\\d+)\\s*\\)`,
+      "g"
+    );
+    for (const match of source.matchAll(spanPattern)) {
+      columnSpan[match[1]] = Number(match[2]);
+    }
+    const rowSpanPattern = new RegExp(
+      `(?:this\\.)?${control.name}\\.SetRowSpan\\(\\s*(?:this\\.)?([A-Za-z_]\\w*)\\s*,\\s*(\\d+)\\s*\\)`,
+      "g"
+    );
+    for (const match of source.matchAll(rowSpanPattern)) {
+      rowSpan[match[1]] = Number(match[2]);
+    }
+
+    if (colStyles.length || rowStyles.length || Object.keys(cells).length) {
+      control.tableLayout = { columns: colStyles, rows: rowStyles, cells, columnSpan, rowSpan };
+    }
+  }
+}
+
+function parseTableSizing(source: string, controlName: string, collection: "ColumnStyles" | "RowStyles"): VisualTableSizing[] {
+  const pattern = new RegExp(
+    `(?:this\\.)?${controlName}\\.${collection}\\.Add\\(\\s*new\\s+(?:System\\.Windows\\.Forms\\.)?(?:Row|Column)Style\\s*\\(\\s*(?:System\\.Windows\\.Forms\\.SizeType\\.)?(\\w+)\\s*,\\s*([\\d.]+)F?\\s*\\)`,
+    "g"
+  );
+  const out: VisualTableSizing[] = [];
+  for (const match of source.matchAll(pattern)) {
+    const type = match[1] as VisualTableSizing["type"];
+    const value = Number(match[2]);
+    out.push({ type, value });
+  }
+  return out;
+}
+
 function isListLikeKind(kind: string): boolean {
   return kind === "CheckedListBox"
     || kind === "ComboBox"
@@ -554,6 +849,71 @@ function applyToolStripHierarchy(source: string, controls: Map<string, MutableCo
 
 function isToolStripContainerKind(kind: string): boolean {
   return kind === "MenuStrip" || kind === "ToolStrip" || kind === "StatusStrip" || kind.startsWith("ToolStrip");
+}
+
+// Capture nested property assignments like `this.grid.DefaultCellStyle.BackColor = ...`
+// that the flat controlPropertyPattern misses. We normalize the common
+// DataGridView style properties into control.properties so the renderer can
+// consume them; visual properties (Font/ForeColor/BackColor) are routed to
+// appearance when they apply to the control's own DefaultCellStyle.
+function applyNestedControlProperties(source: string, controls: Map<string, MutableControl>) {
+  const pattern = /(?:this\.)?([A-Za-z_]\w*)\.([A-Za-z_]\w*)\.([A-Za-z_]\w*)\s*=\s*([^;]+);/g;
+  for (const match of source.matchAll(pattern)) {
+    const target = match[1];
+    const outer = match[2];
+    const inner = match[3];
+    const rawValue = match[4];
+    const control = controls.get(target);
+    if (!control) continue;
+
+    const key = outer + "." + inner;
+    if (outer === "DefaultCellStyle" || outer === "AlternatingRowsDefaultCellStyle"
+        || outer === "ColumnHeadersDefaultCellStyle" || outer === "RowHeadersDefaultCellStyle"
+        || outer === "SelectedCellsDefaultCellStyle") {
+      if (inner === "Font") {
+        control.properties[key] = parseFont(rawValue);
+      } else if (inner === "ForeColor" || inner === "BackColor" || inner === "SelectionBackColor" || inner === "SelectionForeColor") {
+        control.properties[key] = parseColor(rawValue);
+      } else {
+        control.properties[key] = parseValue(rawValue);
+      }
+    } else if (outer === "Columns" || outer === "Rows") {
+      control.properties[key] = parseValue(rawValue);
+    } else {
+      control.properties[key] = parseValue(rawValue);
+    }
+  }
+}
+
+// SplitContainer exposes Panel1/Panel2 as nested Containers. Designer writes
+// `this.split.Panel1.Controls.Add(this.child)` — collect which children belong
+// to each panel so the renderer can lay them out as two regions.
+function applySplitContainer(source: string, controls: Map<string, MutableControl>) {
+  for (const control of controls.values()) {
+    if (control.kind !== "SplitContainer") continue;
+
+    const panel1: string[] = [];
+    const panel2: string[] = [];
+    const p1Pattern = new RegExp(
+      `(?:this\\.)?${control.name}\\.Panel1\\.Controls\\.Add\\(\\s*(?:this\\.)?([A-Za-z_]\\w*)\\s*\\)`,
+      "g"
+    );
+    const p2Pattern = new RegExp(
+      `(?:this\\.)?${control.name}\\.Panel2\\.Controls\\.Add\\(\\s*(?:this\\.)?([A-Za-z_]\\w*)\\s*\\)`,
+      "g"
+    );
+    for (const m of source.matchAll(p1Pattern)) panel1.push(m[1]);
+    for (const m of source.matchAll(p2Pattern)) panel2.push(m[1]);
+
+    if (panel1.length || panel2.length) {
+      control.panel1Children = panel1;
+      control.panel2Children = panel2;
+      // Children added via split panels should be removed from the flat
+      // children list to avoid double rendering.
+      const split = new Set([...panel1, ...panel2]);
+      control.children = control.children.filter((child) => !split.has(child.name));
+    }
+  }
 }
 
 function parseValue(raw: string): unknown {
@@ -619,6 +979,231 @@ function enumTail(value: string): string {
   return (value.split(".").pop() ?? value).replace(/[^A-Za-z0-9_]+$/g, "");
 }
 
+const VISUAL_PROPERTIES = new Set([
+  "Font",
+  "ForeColor",
+  "BackColor",
+  "BorderStyle",
+  "TextAlign",
+  "ImageKey",
+  "ImageIndex",
+  "Image",
+  "Padding",
+  "Margin",
+  "MaximumSize",
+  "MinimumSize"
+]);
+
+function isVisualProperty(property: string): boolean {
+  return VISUAL_PROPERTIES.has(property);
+}
+
+// Parse `new System.Drawing.Font(family, size[, style])` into a VisualFont.
+// Accepts the raw right-hand side string from the Designer assignment.
+function parseFont(value: unknown): VisualFont | undefined {
+  const raw = String(value ?? "").trim();
+  const m = raw.match(/new\s+(?:System\.Drawing\.)?Font\s*\(([\s\S]*?)\)/);
+  if (!m) return undefined;
+
+  const args = splitArgs(m[1]);
+  if (args.length < 2) return undefined;
+  const family = String(parseValue(args[0]));
+  const sizeNum = Number(String(parseValue(args[1])).replace(/F$/i, ""));
+  const font: VisualFont = { family, size: Number.isFinite(sizeNum) ? sizeNum : undefined };
+
+  // Style can be a single enum or a bitwise OR of multiple FontStyle values.
+  const styleArgs = args.slice(2).join("|");
+  if (styleArgs) {
+    const tails = styleArgs.split("|").map((part) => enumTail(part.trim()));
+    const styleText = tails.join("|");
+    if (styleText.includes("Bold")) font.bold = true;
+    if (styleText.includes("Italic")) font.italic = true;
+    if (styleText.includes("Underline")) font.underline = true;
+    if (styleText.includes("Strikeout")) font.strikeout = true;
+  }
+  return font;
+}
+
+// Parse System.Drawing.Color. FromArgb / FromKnownColor / named member access.
+function parseColor(value: unknown): VisualColor | undefined {
+  if (value == null) return undefined;
+  if (typeof value === "object" && "cssColor" in (value as Record<string, unknown>)) {
+    return value as VisualColor;
+  }
+  const raw = String(value ?? "").trim();
+  if (!raw) return undefined;
+
+  const argb = raw.match(/(?:System\.Drawing\.)?Color\.FromArgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*(\d+)\s*)?\)/);
+  if (argb) {
+    const a = argb[4] != null ? Number(argb[4]) : 255;
+    const r = Number(argb[1]);
+    const g = Number(argb[2]);
+    const b = Number(argb[3]);
+    if (a === 255) return { cssColor: `rgb(${r}, ${g}, ${b})` };
+    return { cssColor: `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})` };
+  }
+
+  const known = raw.match(/(?:System\.Drawing\.)?Color\.FromKnownColor\s*\(\s*(?:System\.Drawing\.)?KnownColor\.([A-Za-z_]\w*)\s*\)/);
+  if (known) {
+    const name = known[1];
+    return { cssColor: knownColorToCss(name) ?? `#${name}`, name };
+  }
+
+  const direct = raw.match(/(?:System\.Drawing\.)?Color\.([A-Za-z_]\w*)/);
+  if (direct) {
+    const name = direct[1];
+    if (name === "Empty" || name === "Transparent") return { cssColor: "transparent", name };
+    const css = knownColorToCss(name);
+    if (css) return { cssColor: css, name };
+  }
+
+  // Bare known color name (already extracted by parseValue's enum matcher).
+  const bare = knownColorToCss(raw);
+  if (bare) return { cssColor: bare, name: raw };
+
+  return { cssColor: raw };
+}
+
+// Parse ContentAlignment enum (TopLeft/TopCenter/.../BottomRight) into horizontal+vertical.
+function parseContentAlignment(value: unknown): VisualContentAlignment | undefined {
+  const text = String(value ?? "");
+  const aligned = enumTail(text);
+  const horizontal = aligned.includes("Left") ? "Left"
+    : aligned.includes("Right") ? "Right"
+    : "Center";
+  const vertical = aligned.includes("Top") ? "Top"
+    : aligned.includes("Bottom") ? "Bottom"
+    : "Middle";
+  return { horizontal, vertical };
+}
+
+// Parse BorderStyle (None/FixedSingle/Fixed3D) into a normalized enum.
+function parseBorderStyle(value: unknown): VisualBorderStyle | undefined {
+  const text = enumTail(String(value ?? ""));
+  if (text === "None" || text === "FixedSingle" || text === "Fixed3D") return text;
+  return undefined;
+}
+
+// Map System.Windows.Forms known colors to CSS color values for the common palette.
+function knownColorToCss(name: string): string | undefined {
+  const map: Record<string, string> = {
+    Black: "#000000",
+    White: "#ffffff",
+    Red: "#ff0000",
+    Green: "#008000",
+    Blue: "#0000ff",
+    Yellow: "#ffff00",
+    Gray: "#808080",
+    DarkGray: "#a9a9a9",
+    LightGray: "#d3d3d3",
+    Silver: "#c0c0c0",
+    Transparent: "transparent",
+    Control: "#f0f0f0",
+    ControlDark: "#a0a0a0",
+    ControlDarkDark: "#808080",
+    ControlLight: "#e3e3e3",
+    ControlLightLight: "#ffffff",
+    ControlText: "#000000",
+    Window: "#ffffff",
+    WindowText: "#000000",
+    Highlight: "#0078d7",
+    HighlightText: "#ffffff",
+    ActiveCaption: "#c9c9c9",
+    ActiveCaptionText: "#000000",
+    InactiveCaption: "#dcdcdc",
+    InactiveCaptionText: "#000000",
+    Desktop: "#000000",
+    Info: "#ffffe1",
+    InfoText: "#000000",
+    Menu: "#f0f0f0",
+    MenuText: "#000000",
+    MenuBar: "#f0f0f0",
+    MenuHighlight: "#0078d7",
+    ButtonFace: "#f0f0f0",
+    ButtonHighlight: "#ffffff",
+    ButtonShadow: "#a0a0a0",
+    GradientActiveCaption: "#c9c9c9",
+    GradientInactiveCaption: "#dcdcdc"
+  };
+  return map[name];
+}
+
+function toVisualSize(value: unknown): VisualSize | undefined {
+  if (isRecord(value) && typeof value.width === "number" && typeof value.height === "number") {
+    return { width: value.width, height: value.height };
+  }
+  return undefined;
+}
+
+// Parse `new System.Windows.Forms.Padding(all)` or `new Padding(l, t, r, b)`.
+function parsePadding(value: unknown): VisualPadding | undefined {
+  const raw = String(value ?? "").trim();
+  const m = raw.match(/new\s+(?:System\.Windows\.Forms\.)?Padding\s*\(\s*([^)]*)\s*\)/);
+  if (!m) return undefined;
+  const args = m[1].split(",").map((s) => Number(String(parseValue(s.trim()))));
+  if (args.length === 1) {
+    return { left: args[0], top: args[0], right: args[0], bottom: args[0] };
+  }
+  if (args.length >= 4) {
+    return { left: args[0], top: args[1], right: args[2], bottom: args[3] };
+  }
+  return undefined;
+}
+
+// Split a C# argument list on top-level commas, respecting parentheses and
+// string literals. Used by parseFont and similar structured value parsers.
+function splitArgs(source: string): string[] {
+  const args: string[] = [];
+  let depth = 0;
+  let current = "";
+  let i = 0;
+  while (i < source.length) {
+    const ch = source[i];
+    if (ch === "(") depth += 1;
+    else if (ch === ")") depth -= 1;
+    else if (ch === ",") {
+      if (depth === 0) {
+        args.push(current.trim());
+        current = "";
+        i += 1;
+        continue;
+      }
+    } else if (ch === "@") {
+      // verbatim string: @"..." with "" escapes
+      current += ch;
+      i += 1;
+      if (source[i] === "\"") {
+        current += source[i];
+        i += 1;
+        while (i < source.length) {
+          current += source[i];
+          if (source[i] === "\"") {
+            if (source[i + 1] === "\"") { current += source[i + 1]; i += 2; continue; }
+            i += 1;
+            break;
+          }
+          i += 1;
+        }
+        continue;
+      }
+    } else if (ch === "\"") {
+      current += ch;
+      i += 1;
+      while (i < source.length) {
+        current += source[i];
+        if (source[i] === "\\") { current += source[i + 1] ?? ""; i += 2; continue; }
+        if (source[i] === "\"") { i += 1; break; }
+        i += 1;
+      }
+      continue;
+    }
+    current += ch;
+    i += 1;
+  }
+  if (current.trim()) args.push(current.trim());
+  return args;
+}
+
 function shortTypeName(typeName: string): string {
   return typeName.split(".").pop()?.replace(/[<>]/g, "") ?? typeName;
 }
@@ -637,7 +1222,7 @@ function isKnownDesignerKind(kind: string): boolean {
 }
 
 function isColumnKind(kind: string): boolean {
-  return kind.startsWith("DataGridView") && kind.endsWith("Column");
+  return (kind.startsWith("DataGridView") && kind.endsWith("Column")) || kind === "ColumnHeader";
 }
 
 function buildControlCoverage(controlCounts: Map<string, number>): ControlCoverage {
