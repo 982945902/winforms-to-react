@@ -49,7 +49,7 @@ async function collectBaseKindMap(inputPath: string): Promise<Map<string, string
   }
 
   const map = new Map<string, string>();
-  const pattern = /^\s*(?:public|internal|protected|private)?\s*(?:partial\s+)?class\s+([A-Za-z_]\w*)\s*:\s*([A-Za-z_][\w.]*)/gm;
+  const pattern = /^\s*(?:(?:public|internal|protected|private|sealed|abstract|static|partial)\s+)*class\s+([A-Za-z_]\w*)\s*:\s*([A-Za-z_][\w.]*)/gm;
   for (const file of csFiles) {
     const source = await readFile(file, "utf8");
     for (const match of source.matchAll(pattern)) {
