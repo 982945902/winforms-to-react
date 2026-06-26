@@ -49,12 +49,24 @@ async function collectBaseKindMap(inputPath: string): Promise<Map<string, string
   }
 
   const map = new Map<string, string>();
-  const pattern = /^\s*(?:(?:public|internal|protected|private|sealed|abstract|static|partial)\s+)*class\s+([A-Za-z_]\w*)\s*:\s*([A-Za-z_][\w.]*)/gm;
+  const pattern = /^\s*(?:(?:public|internal|protected|private|sealed|abstract|static|partial)\s+)*class\s+([A-Za-z_]\w*)\s*:\s*([A-Za-z_][\w.<>]*)/gm;
   for (const file of csFiles) {
     const source = await readFile(file, "utf8");
     for (const match of source.matchAll(pattern)) {
       const derived = match[1];
-      const base = match[2].split(".").pop() ?? match[2];
+      const rawBase = match[2];
+      // Handle generic base: GenericBase<Button> -> if the type argument is a
+      // known WinForms control kind, map directly to it; otherwise fall back
+      // to the generic class name without type args.
+      const genericMatch = rawBase.match(/^([A-Za-z_][\w.]*)<([A-Za-z_][\w.]*)>$/);
+      if (genericMatch) {
+        const genericName = genericMatch[1].split(".").pop() ?? genericMatch[1];
+        const typeArg = genericMatch[2].split(".").pop() ?? genericMatch[2];
+        if (derived !== genericName) map.set(derived, genericName);
+        if (derived !== typeArg) map.set(derived, typeArg);
+        continue;
+      }
+      const base = rawBase.split(".").pop() ?? rawBase;
       if (derived !== base) map.set(derived, base);
     }
   }

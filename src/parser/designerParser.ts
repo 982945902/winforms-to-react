@@ -1306,17 +1306,41 @@ function resolveBaseKind(kind: string, baseKindMap?: Map<string, string>): strin
   for (let i = 0; i < 32; i += 1) {
     if (SUPPORTED_CONTROLS.has(current) || DEGRADED_CONTROLS.has(current)) return current;
     const base = baseKindMap.get(current);
-    if (!base || seen.has(base)) return kind;
+    if (!base || seen.has(base)) break;
     seen.add(base);
     current = base;
   }
-  return kind;
+  // Heuristic: if the inheritance chain dead-ends at Control/Component, try to
+  // infer the control kind from the class name (e.g. BlackStyleProgressBar ->
+  // ProgressBar, FancyTextBox -> TextBox). Match the longest known kind that
+  // appears as a substring of the class name to avoid Button matching ButtonBase.
+  return inferKindFromName(kind);
+}
+
+// Infer a WinForms control kind from a class name by checking if any known
+// control kind is a suffix or substring of the name. Prefers the longest match.
+function inferKindFromName(name: string): string {
+  let best: string | undefined;
+  let bestLen = 0;
+  for (const kind of SUPPORTED_CONTROLS) {
+    if (name.includes(kind) && kind.length > bestLen) {
+      best = kind;
+      bestLen = kind.length;
+    }
+  }
+  return best ?? name;
 }
 
 // Recursively replace control.kind with its resolved base kind, preserving
 // the original kind in properties.originalKind for traceability.
 function resolveControlKind(control: MutableControl, baseKindMap: Map<string, string>): void {
-  const resolved = resolveBaseKind(control.kind, baseKindMap);
+  let resolved = resolveBaseKind(control.kind, baseKindMap);
+  // If still Control (degraded base), try name-based heuristic to get a more
+  // specific supported kind (e.g. BlackStyleProgressBar -> ProgressBar).
+  if (resolved === "Control") {
+    const inferred = inferKindFromName(control.kind);
+    if (inferred !== control.kind && inferred !== "Control") resolved = inferred;
+  }
   if (resolved !== control.kind) {
     if (!control.properties.originalKind) control.properties.originalKind = control.kind;
     control.kind = resolved;
