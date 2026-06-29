@@ -898,13 +898,31 @@ function applyToolStripHierarchy(source: string, controls: Map<string, MutableCo
 // StatusStrip defaults to Bottom. Apply implicit dock so the layout engine
 // reserves space for them and Dock=Fill content doesn't overlap.
 function applyImplicitDock(controls: Map<string, MutableControl>, form: VisualForm) {
-  const all = [...controls.values()];
-  // Also check form-level controls
-  for (const list of [form.controls, all]) {
-    for (const control of list) {
-      if (control.dock) continue;
-      if (control.kind === "MenuStrip") control.dock = "Top";
-      else if (control.kind === "StatusStrip") control.dock = "Bottom";
+  // MenuStrip/StatusStrip without explicit Dock default to Top/Bottom.
+  // Controls without bounds or Dock that were added to a container (not
+  // form-level) default to Fill — common when layout is set via
+  // resources.ApplyResources (ShareX pattern) which we cannot parse.
+  const childNames = new Set([...controls.values()].flatMap((c) => c.children.map((ch) => ch.name)));
+  for (const control of controls.values()) {
+    if (control.dock) continue;
+    if (control.kind === "MenuStrip") {
+      control.dock = "Top";
+    } else if (control.kind === "StatusStrip") {
+      control.dock = "Bottom";
+    } else if (!control.bounds && childNames.has(control.name)) {
+      // No bounds and is a child of some container -> Fill
+      control.dock = "Fill";
+    }
+  }
+  for (const control of form.controls) {
+    if (control.dock) continue;
+    if (control.kind === "MenuStrip") {
+      control.dock = "Top";
+    } else if (control.kind === "StatusStrip") {
+      control.dock = "Bottom";
+    } else if (!control.bounds) {
+      // Form-level control with no bounds (layout via resources) -> Fill
+      control.dock = "Fill";
     }
   }
 }

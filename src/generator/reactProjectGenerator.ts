@@ -589,7 +589,7 @@ function WinControl({ control, hostStyle }: { control: VisualControl; hostStyle?
     case "Splitter":
       return <div className="wf-splitter" style={style} />;
     case "TabControl":
-      return <div className="wf-tab" style={style}>{children.map((child, index) => <WinControl key={child.name} control={child} hostStyle={childStyles[index]} />)}</div>;
+      return <WinTabControl control={control} style={style} />;
     case "DataGridView":
       return <WinDataGridView control={control} style={style} />;
     case "MenuStrip":
@@ -785,6 +785,24 @@ function WinToolStripContainer({ control, style }: { control: VisualControl; sty
       {bottom.length > 0 ? <div className="wf-tsc-bottom" style={{ display: "flex", flexWrap: "wrap", gap: "2px", padding: "2px", background: "linear-gradient(#fafafa,#e5e5e5)", borderTop: "1px solid #c0c0c0", flexShrink: 0 }}>
         {bottom.map((c) => { const b=c.bounds??{x:0,y:0,width:0,height:0}; return <WinControl key={c.name} control={c} hostStyle={{position:"relative",height:b.height||undefined}} />; })}
       </div> : null}
+    </div>
+  );
+}
+
+// TabControl: WinForms-style tabbed panel. Shows a tab strip with each
+// TabPage's text, and renders only the first page's content (static preview).
+function WinTabControl({ control, style }: { control: VisualControl; style: CSSProperties }) {
+  const children = control.children ?? [];
+  const tabs = children.filter((c) => c.kind === "TabPage" || c.kind === "UserControl");
+  const tabStyle: CSSProperties = { ...style, display: "flex", flexDirection: "column", overflow: "hidden" };
+  return (
+    <div className="wf-tab" style={tabStyle}>
+      <div className="wf-tab-strip">
+        {tabs.map((tab, i) => <span key={tab.name} className={"wf-tab-header" + (i === 0 ? " active" : "")}>{tab.text || tab.name}</span>)}
+      </div>
+      <div className="wf-tab-content" style={{ flex: 1, position: "relative", overflow: "auto" }}>
+        {tabs.length > 0 ? <WinControl control={tabs[0]} hostStyle={{ position: "absolute", inset: 0 }} /> : null}
+      </div>
     </div>
   );
 }
@@ -1266,6 +1284,38 @@ body {
 }
 
 .wf-panel,
+.wf-tab-strip {
+  display: flex;
+  gap: 0;
+  background: linear-gradient(#fafafa, #e0e0e0);
+  border-bottom: 1px solid #b0b0b0;
+  padding: 2px 2px 0;
+  flex-shrink: 0;
+}
+
+.wf-tab-header {
+  padding: 4px 10px;
+  font-size: 12px;
+  border: 1px solid #c0c0c0;
+  border-bottom: none;
+  background: #e8e8e8;
+  color: #555;
+  cursor: default;
+  border-radius: 3px 3px 0 0;
+}
+
+.wf-tab-header.active {
+  background: #ffffff;
+  color: #000;
+  border-color: #7a7a7a;
+  border-bottom: 1px solid #fff;
+  margin-bottom: -1px;
+}
+
+.wf-tab-content {
+  background: #f0f0f0;
+}
+
 .wf-tab {
   box-sizing: border-box;
   border: 1px solid #b8b8b8;
