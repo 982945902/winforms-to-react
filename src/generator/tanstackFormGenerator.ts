@@ -69,13 +69,34 @@ function isInputControl(kind: string): boolean {
     || kind === "TrackBar" || kind === "ProgressBar";
 }
 
+// Sanitize a WinForms control name into a valid JS identifier for use as
+// a zod schema key and form field name. Strips leading underscores and
+// replaces non-identifier characters.
+let fieldNameCounter = 0;
+const fieldNameMap = new Map<string, string>();
+function sanitizeFieldName(original: string): string {
+  const cached = fieldNameMap.get(original);
+  if (cached) return cached;
+  let cleaned = original.replace(/[^A-Za-z0-9_]/g, "_").replace(/^_+/, "");
+  if (!cleaned) cleaned = "field";
+  if (!/^[A-Za-z_]/.test(cleaned)) cleaned = "_" + cleaned;
+  // Ensure uniqueness
+  let name = cleaned;
+  while ([...fieldNameMap.values()].includes(name)) {
+    fieldNameCounter += 1;
+    name = cleaned + "_" + fieldNameCounter;
+  }
+  fieldNameMap.set(original, name);
+  return name;
+}
+
 function extractField(control: VisualControl): FormField | null {
   const a = control.appearance ?? {};
   const kind = control.kind;
   if (!isInputControl(kind)) return null;
 
-  const name = control.name;
-  const label = control.text ?? control.name;
+  const name = sanitizeFieldName(control.name);
+  const label = cleanMnemonic(control.text ?? control.name);
 
   if (kind === "CheckBox" || kind === "RadioButton") {
     return { name, label, type: "boolean", defaultValue: a.checked ?? false, readOnly: a.readOnly, tabIndex: control.tabIndex };
@@ -124,6 +145,58 @@ function collectFields(control: VisualControl, fields: FormField[]): void {
   for (const child of control.children ?? []) collectFields(child, fields);
 }
 
+// Collect fields and associate nearby Labels as field labels. In WinForms,
+// a Label control positioned just above or to the left of an input control
+// serves as its caption. We match by proximity within the same parent.
+// Track which Label controls have been associated with fields (to avoid
+// rendering them twice — once as field label, once as standalone label).
+const consumedLabels = new Set<string>();
+
+function collectFieldsWithLabels(controls: VisualControl[], fields: FormField[]): void {
+  // First pass: collect all fields and all labels per container level
+  const allControls: VisualControl[] = [];
+  function flatten(c: VisualControl) { allControls.push(c); (c.children ?? []).forEach(flatten); }
+  controls.forEach(flatten);
+
+  const fieldControls = allControls.filter((c) => isInputControl(c.kind));
+  const labels = allControls.filter((c) => c.kind === "Label" || c.kind === "LinkLabel");
+
+  for (const fc of fieldControls) {
+    const field = extractField(fc);
+    if (!field) continue;
+    // Find closest label by position
+    if (fc.bounds && labels.length > 0) {
+      let bestLabel: string | undefined;
+      let bestDist = Infinity;
+      for (const label of labels) {
+        if (!label.bounds) continue;
+        // Label should be above or to the left, with similar y
+        const dy = Math.abs(label.bounds.y - fc.bounds.y);
+        const dx = label.bounds.x - fc.bounds.x;
+        if (dy < 30 && dx <= 5) {
+          const dist = dy + Math.abs(dx);
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestLabel = cleanMnemonic(label.text ?? "");
+          }
+        }
+      }
+      if (bestLabel) {
+        field.label = bestLabel;
+        // Mark the closest label as consumed
+        for (const label of labels) {
+          if (label.text === bestLabel && label.bounds) {
+            const dy = Math.abs(label.bounds.y - fc.bounds!.y);
+            const dx = label.bounds.x - fc.bounds!.x;
+            if (dy < 30 && dx <= 5) { consumedLabels.add(label.name); break; }
+          }
+        }
+      }
+    }
+    fields.push(field);
+  }
+}
+
 // ---- Zod schema generation ----
 
 function generateZodSchema(fields: FormField[]): string {
@@ -158,15 +231,31 @@ function generateZodSchema(fields: FormField[]): string {
 // ---- Form component generation ----
 
 function generateFormComponent(form: VisualForm): string {
+  fieldNameMap.clear();
+  fieldNameCounter = 0;
+  consumedLabels.clear();
   const fields: FormField[] = [];
-  for (const control of form.controls) collectFields(control, fields);
+  collectFieldsWithLabels(form.controls, fields);
 
   const componentName = form.name.replace(/[^A-Za-z0-9]/g, "");
   const schemaName = componentName + "Schema";
   const defaultValues = generateDefaultValues(fields);
   const zodSchema = generateZodSchema(fields);
   const fieldRenders = fields.map((f) => generateFieldRender(f)).join("\n");
-  const layoutRender = generateLayoutRender(form.controls, new Set(fields.map((f) => f.name)));
+  // Build a map from original control name to field for layout rendering
+  const fieldByControlName = new Map<string, FormField>();
+  // Re-collect with original names for matching
+  for (const c of form.controls) {
+    function collectForMap(ctrl: VisualControl) {
+      if (isInputControl(ctrl.kind)) {
+        const f = fields.find((ff) => ff.name === sanitizeFieldName(ctrl.name));
+        if (f) fieldByControlName.set(ctrl.name, f);
+      }
+      (ctrl.children ?? []).forEach(collectForMap);
+    }
+    collectForMap(c);
+  }
+  const layoutRender = generateLayoutRender(form.controls, fieldByControlName);
 
   return `import { useState } from "react";
 import { useForm } from "@tanstack/react-form";
@@ -325,26 +414,26 @@ ${opts}
 
 // ---- Layout rendering (non-field controls as containers) ----
 
-function generateLayoutRender(controls: VisualControl[], fieldNames: Set<string>, indent = "      "): string {
+function generateLayoutRender(controls: VisualControl[], fieldMap: Map<string, FormField>, indent = "      "): string {
   const blocks: string[] = [];
   for (const control of controls) {
-    if (fieldNames.has(control.name)) {
-      // Field controls are rendered inline by generateFieldRender, but layout
-      // generation needs to place them too — we emit a placeholder reference.
-      blocks.push(generateFieldRender(extractField(control)!));
+    const field = fieldMap.get(control.name);
+    if (field) {
+      blocks.push(generateFieldRender(field));
       continue;
     }
-    const block = generateContainerBlock(control, fieldNames, indent);
+    if (consumedLabels.has(control.name)) continue;
+    const block = generateContainerBlock(control, fieldMap, indent);
     if (block) blocks.push(block);
   }
   return blocks.join("\n");
 }
 
-function generateContainerBlock(control: VisualControl, fieldNames: Set<string>, indent: string): string | null {
+function generateContainerBlock(control: VisualControl, fieldMap: Map<string, FormField>, indent: string): string | null {
   const kind = control.kind;
-  const label = escapeJsx(control.text ?? control.name);
+  const label = escapeJsx(cleanMnemonic(control.text ?? control.name));
   const children = control.children ?? [];
-  const childBlocks = generateLayoutRender(children, fieldNames, indent + "  ");
+  const childBlocks = generateLayoutRender(children, fieldMap, indent + "  ");
 
   if (kind === "GroupBox") {
     return `${indent}<fieldset className="wf-group">
@@ -356,7 +445,7 @@ ${indent}</fieldset>`;
     const tabs = children.filter((c) => c.kind === "TabPage" || c.kind === "UserControl");
     const tabHeaders = tabs.map((t, i) => `${indent}    <span className=${i === 0 ? '"wf-tab-header active"' : '"wf-tab-header"'}>${escapeJsx(t.text ?? t.name)}</span>`).join("\n");
     const firstPage = tabs[0];
-    const pageContent = firstPage ? generateLayoutRender(firstPage.children ?? [], fieldNames, indent + "      ") : "";
+    const pageContent = firstPage ? generateLayoutRender(firstPage.children ?? [], fieldMap, indent + "      ") : "";
     return `${indent}<div className="wf-tabcontrol">
 ${indent}  <div className="wf-tab-strip">
 ${tabHeaders}
@@ -368,10 +457,11 @@ ${indent}</div>`;
   }
   if (kind === "TableLayoutPanel") {
     const cellBlocks = children.map((child) => {
-      if (fieldNames.has(child.name)) {
-        return generateFieldRender(extractField(child)!);
+      const cf = fieldMap.get(child.name);
+      if (cf) {
+        return generateFieldRender(cf);
       }
-      return generateContainerBlock(child, fieldNames, indent + "    ") ?? "";
+      return generateContainerBlock(child, fieldMap, indent + "    ") ?? "";
     }).filter(Boolean).join("\n");
     return `${indent}<div className="wf-tlp">
 ${cellBlocks}
@@ -402,6 +492,11 @@ ${indent}</div>`;
 
 function escapeJsx(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/\n/g, " ").replace(/\r/g, "");
+}
+
+// Strip WinForms mnemonic markers (&X) from display text.
+function cleanMnemonic(text: string): string {
+  return text.replace(/&([A-Za-z0-9])/g, "$1");
 }
 
 // ---- Project scaffold ----
