@@ -2,12 +2,14 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { generateReactProject } from "./generator/reactProjectGenerator.js";
+import { generateTanStackFormProject } from "./generator/tanstackFormGenerator.js";
 import { convertDesignerSources, findDesignerFiles } from "./parser/scanner.js";
 
 type CliOptions = {
   input?: string;
   outDir?: string;
   format?: "json" | "text";
+  formEngine?: "compat" | "tanstack";
 };
 
 async function main() {
@@ -49,9 +51,14 @@ async function runConvert(options: CliOptions) {
   const input = resolveRequiredInput(options);
   const outDir = resolve(options.outDir ?? "out/wf2react-preview");
   const result = await convertDesignerSources(input);
-  await generateReactProject({ outDir, forms: result.forms, report: result.report });
-  console.log(`Converted ${result.report.formsConverted} form(s), ${result.report.controlsConverted} control(s)`);
-  console.log(`Preview project: ${outDir}`);
+  if (options.formEngine === "tanstack") {
+    await generateTanStackFormProject({ outDir, forms: result.forms, report: result.report });
+    console.log(`Converted ${result.report.formsConverted} form(s) to TanStack Form`);
+  } else {
+    await generateReactProject({ outDir, forms: result.forms, report: result.report });
+    console.log(`Converted ${result.report.formsConverted} form(s), ${result.report.controlsConverted} control(s)`);
+  }
+  console.log(`Output: ${outDir}`);
 }
 
 async function runReport(options: CliOptions) {
@@ -76,6 +83,8 @@ function parseOptions(args: string[]): CliOptions {
       options.outDir = args[++i];
     } else if (arg === "--json") {
       options.format = "json";
+    } else if (arg === "--form") {
+      options.formEngine = args[++i] as "tanstack";
     } else if (!options.input) {
       options.input = arg;
     } else {
@@ -97,11 +106,10 @@ function printHelp() {
 
 Usage:
   wf2react scan <file-or-folder> [--json]
-  wf2react convert <file-or-folder> --out <preview-project-dir>
+  wf2react convert <file-or-folder> --out <dir> [--form tanstack]
   wf2react report <file-or-folder> [--out <dir>]
 
-The first version converts WinForms Designer source to a standalone React
-compatibility preview. Business logic migration is intentionally out of scope.
+  --form tanstack  Generate TanStack Form + Zod instead of static preview
 `);
 }
 
