@@ -937,10 +937,17 @@ function applySplitContainer(source: string, controls: Map<string, MutableContro
     if (panel1.length || panel2.length) {
       control.panel1Children = panel1;
       control.panel2Children = panel2;
-      // Children added via split panels should be removed from the flat
-      // children list to avoid double rendering.
+      // Add panel children as actual child control objects so the renderer can
+      // find them. Remove duplicates from the flat children list.
       const split = new Set([...panel1, ...panel2]);
-      control.children = control.children.filter((child) => !split.has(child.name));
+      const existing = new Set(control.children.map((c) => c.name));
+      for (const name of [...panel1, ...panel2]) {
+        const child = controls.get(name);
+        if (child && !existing.has(name)) {
+          control.children.push(child);
+          existing.add(name);
+        }
+      }
     }
   }
 }
@@ -974,8 +981,18 @@ function applyToolStripContainerPanels(source: string, controls: Map<string, Mut
       }
     }
     if (allNames.length) {
+      // Add panel children as actual child control objects so the renderer can
+      // find them via control.children. Remove from the flat children list any
+      // that were already added (via Controls.Add) to avoid duplicates.
       const used = new Set(allNames);
-      control.children = control.children.filter((child) => !used.has(child.name));
+      const existing = new Set(control.children.map((c) => c.name));
+      for (const name of allNames) {
+        const child = controls.get(name);
+        if (child && !existing.has(name)) {
+          control.children.push(child);
+          existing.add(name);
+        }
+      }
     }
   }
 }

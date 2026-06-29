@@ -592,7 +592,10 @@ function WinControl({ control, hostStyle }: { control: VisualControl; hostStyle?
     case "ToolStripDropDownButton":
     case "ToolStripSplitButton":
     case "ToolStripMenuItem":
-      return <button className="wf-strip-button" style={style} title={eventTitle(control)}>{label || control.name}{children.map((child) => <WinControl key={child.name} control={child} />)}</button>;
+      if (children.length > 0) {
+        return <div className="wf-strip-button wf-strip-dropdown" style={style} title={eventTitle(control)}>{label || control.name}<div className="wf-strip-dropdown-items">{children.map((child) => <WinControl key={child.name} control={child} />)}</div></div>;
+      }
+      return <button className="wf-strip-button" style={style} title={eventTitle(control)}>{label || control.name}</button>;
     case "ToolStripLabel":
     case "ToolStripStatusLabel":
       return <span className="wf-strip-label">{label || control.name}</span>;
@@ -745,7 +748,7 @@ function WinToolStripContainer({ control, style }: { control: VisualControl; sty
   const right = pick(rightNames);
   const content = pick(contentNames);
   const rest = all.filter((c) => !topNames.has(c.name) && !bottomNames.has(c.name) && !leftNames.has(c.name) && !rightNames.has(c.name) && !contentNames.has(c.name));
-  const containerStyle: CSSProperties = { ...style, display: grid, gridTemplateRows: "auto 1fr auto", gridTemplateColumns: "auto 1fr auto" };
+  const containerStyle: CSSProperties = { ...style, display: "grid", gridTemplateRows: "auto 1fr auto", gridTemplateColumns: "auto 1fr auto" };
   return (
     <div className="wf-panel wf-tsc" style={containerStyle}>
       <div className="wf-tsc-top" style={{ gridColumn: "1 / 4", display: "flex", flexWrap: "wrap", gap: "2px", padding: "2px", background: "linear-gradient(#fafafa,#e5e5e5)", borderBottom: "1px solid #c0c0c0" }}>
@@ -1311,6 +1314,15 @@ body {
 .wf-strip-button:hover {
   border-color: #8db2e3;
   background: #dcebff;
+}
+
+.wf-strip-dropdown {
+  position: relative;
+  cursor: default;
+}
+
+.wf-strip-dropdown-items {
+  display: none;
 }
 
 .wf-strip-separator {
