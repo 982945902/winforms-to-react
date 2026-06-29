@@ -220,6 +220,8 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
     for (const control of controls.values()) resolveControlKind(control, options.baseKindMap);
   }
 
+  applyImplicitDock(controls, form);
+
   if (form.controls.length === 0) {
     const childNames = new Set([...controls.values()].flatMap((control) => control.children.map((child) => child.name)));
     form.controls = [...controls.values()].filter((control) => !childNames.has(control.name));
@@ -872,6 +874,21 @@ function applyToolStripHierarchy(source: string, controls: Map<string, MutableCo
       if (!parent.children.some((existing) => existing.name === child.name)) {
         parent.children.push(child);
       }
+    }
+  }
+}
+
+// WinForms convention: MenuStrip without explicit Dock defaults to Top,
+// StatusStrip defaults to Bottom. Apply implicit dock so the layout engine
+// reserves space for them and Dock=Fill content doesn't overlap.
+function applyImplicitDock(controls: Map<string, MutableControl>, form: VisualForm) {
+  const all = [...controls.values()];
+  // Also check form-level controls
+  for (const list of [form.controls, all]) {
+    for (const control of list) {
+      if (control.dock) continue;
+      if (control.kind === "MenuStrip") control.dock = "Top";
+      else if (control.kind === "StatusStrip") control.dock = "Bottom";
     }
   }
 }

@@ -725,9 +725,9 @@ function WinSplitContainer({ control, style }: { control: VisualControl; style: 
   const panel2Style: CSSProperties = { flex: 1, overflow: "auto", position: "relative" };
   return (
     <div className="wf-split" style={splitStyle}>
-      <div className="wf-split-panel" style={panel1Style}>{p1.map((c) => <WinControl key={c.name} control={c} />)}</div>
+      <div className="wf-split-panel" style={panel1Style}>{p1.map((c) => <WinControl key={c.name} control={c} hostStyle={{position:"relative"}} />)}</div>
       <div className="wf-splitter-bar" aria-hidden="true" />
-      <div className="wf-split-panel" style={panel2Style}>{p2.map((c) => <WinControl key={c.name} control={c} />)}{rest.map((c) => <WinControl key={c.name} control={c} />)}</div>
+      <div className="wf-split-panel" style={panel2Style}>{p2.map((c) => <WinControl key={c.name} control={c} hostStyle={{position:"relative"}} />)}{rest.map((c) => <WinControl key={c.name} control={c} hostStyle={{position:"relative"}} />)}</div>
     </div>
   );
 }
@@ -748,24 +748,30 @@ function WinToolStripContainer({ control, style }: { control: VisualControl; sty
   const right = pick(rightNames);
   const content = pick(contentNames);
   const rest = all.filter((c) => !topNames.has(c.name) && !bottomNames.has(c.name) && !leftNames.has(c.name) && !rightNames.has(c.name) && !contentNames.has(c.name));
-  const containerStyle: CSSProperties = { ...style, display: "grid", gridTemplateRows: "auto 1fr auto", gridTemplateColumns: "auto 1fr auto" };
+  const containerStyle: CSSProperties = { ...style, display: "flex", flexDirection: "column", overflow: "hidden" };
+  const hasLeft = left.length > 0;
+  const hasRight = right.length > 0;
+  const middleStyle: CSSProperties = { flex: 1, display: "flex", overflow: "hidden", position: "relative" };
+  const contentStyle: CSSProperties = { flex: 1, position: "relative", overflow: "auto", background: "#f0f0f0" };
   return (
     <div className="wf-panel wf-tsc" style={containerStyle}>
-      <div className="wf-tsc-top" style={{ gridColumn: "1 / 4", display: "flex", flexWrap: "wrap", gap: "2px", padding: "2px", background: "linear-gradient(#fafafa,#e5e5e5)", borderBottom: "1px solid #c0c0c0" }}>
-        {top.map((c) => <WinControl key={c.name} control={c} />)}
+      {top.length > 0 ? <div className="wf-tsc-top" style={{ display: "flex", flexWrap: "wrap", gap: "2px", padding: "2px", background: "linear-gradient(#fafafa,#e5e5e5)", borderBottom: "1px solid #c0c0c0", flexShrink: 0 }}>
+        {top.map((c) => { const b=c.bounds??{x:0,y:0,width:0,height:0}; return <WinControl key={c.name} control={c} hostStyle={{position:"relative",height:b.height||undefined}} />; })}
+      </div> : null}
+      <div style={middleStyle}>
+        {hasLeft ? <div className="wf-tsc-left" style={{ display: "flex", flexDirection: "column", gap: "2px", padding: "2px", background: "linear-gradient(#fafafa,#e5e5e5)", borderRight: "1px solid #c0c0c0", flexShrink: 0 }}>
+          {left.map((c) => <WinControl key={c.name} control={c} hostStyle={{position:"relative"}} />)}
+        </div> : null}
+        <div className="wf-tsc-content" style={contentStyle}>
+          {content.map((c) => <WinControl key={c.name} control={c} />)}{rest.map((c) => <WinControl key={c.name} control={c} />)}
+        </div>
+        {hasRight ? <div className="wf-tsc-right" style={{ display: "flex", flexDirection: "column", gap: "2px", padding: "2px", background: "linear-gradient(#fafafa,#e5e5e5)", borderLeft: "1px solid #c0c0c0", flexShrink: 0 }}>
+          {right.map((c) => <WinControl key={c.name} control={c} hostStyle={{position:"relative"}} />)}
+        </div> : null}
       </div>
-      <div className="wf-tsc-left" style={{ display: "flex", flexDirection: "column", gap: "2px", padding: "2px", background: "linear-gradient(#fafafa,#e5e5e5)", borderRight: "1px solid #c0c0c0" }}>
-        {left.map((c) => <WinControl key={c.name} control={c} />)}
-      </div>
-      <div className="wf-tsc-content" style={{ position: "relative", overflow: "auto", background: "#f0f0f0" }}>
-        {content.map((c) => <WinControl key={c.name} control={c} />)}{rest.map((c) => <WinControl key={c.name} control={c} />)}
-      </div>
-      <div className="wf-tsc-right" style={{ display: "flex", flexDirection: "column", gap: "2px", padding: "2px", background: "linear-gradient(#fafafa,#e5e5e5)", borderLeft: "1px solid #c0c0c0" }}>
-        {right.map((c) => <WinControl key={c.name} control={c} />)}
-      </div>
-      <div className="wf-tsc-bottom" style={{ gridColumn: "1 / 4", display: "flex", flexWrap: "wrap", gap: "2px", padding: "2px", background: "linear-gradient(#fafafa,#e5e5e5)", borderTop: "1px solid #c0c0c0" }}>
-        {bottom.map((c) => <WinControl key={c.name} control={c} />)}
-      </div>
+      {bottom.length > 0 ? <div className="wf-tsc-bottom" style={{ display: "flex", flexWrap: "wrap", gap: "2px", padding: "2px", background: "linear-gradient(#fafafa,#e5e5e5)", borderTop: "1px solid #c0c0c0", flexShrink: 0 }}>
+        {bottom.map((c) => { const b=c.bounds??{x:0,y:0,width:0,height:0}; return <WinControl key={c.name} control={c} hostStyle={{position:"relative",height:b.height||undefined}} />; })}
+      </div> : null}
     </div>
   );
 }
