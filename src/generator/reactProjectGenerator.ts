@@ -383,8 +383,21 @@ export type VisualForm = {
 };
 
 export function WinFormHost({ form }: { form: VisualForm }) {
-  const width = form.clientSize?.width ?? 900;
-  const height = form.clientSize?.height ?? 640;
+  // If no ClientSize (common for UserControl-based forms), infer from the
+  // maximum right/bottom edge of all top-level child controls.
+  let width = form.clientSize?.width ?? 0;
+  let height = form.clientSize?.height ?? 0;
+  if (!form.clientSize) {
+    for (const c of form.controls) {
+      const b = c.bounds;
+      if (b) {
+        width = Math.max(width, b.x + b.width);
+        height = Math.max(height, b.y + b.height);
+      }
+    }
+    if (width === 0) width = 900;
+    if (height === 0) height = 640;
+  }
   const childStyles = layoutChildren({ width, height }, form.controls);
   const border = form.formBorderStyle ?? "Sizable";
   const windowStyle: CSSProperties = { width, minHeight: height + 34 };
