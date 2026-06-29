@@ -807,19 +807,35 @@ function applyTableLayout(source: string, controls: Map<string, MutableControl>)
 
     if (colStyles.length || rowStyles.length || Object.keys(cells).length) {
       control.tableLayout = { columns: colStyles, rows: rowStyles, cells, columnSpan, rowSpan };
+      // Add cell children as actual child control objects so the renderer can
+      // find them via control.children. Controls.Add(child, col, row) is not
+      // matched by the generic controlAddPattern (it only matches single-arg Add).
+      const existing = new Set(control.children.map((c) => c.name));
+      for (const childName of Object.keys(cells)) {
+        const child = controls.get(childName);
+        if (child && !existing.has(childName)) {
+          control.children.push(child);
+          existing.add(childName);
+        }
+      }
     }
   }
 }
 
 function parseTableSizing(source: string, controlName: string, collection: "ColumnStyles" | "RowStyles"): VisualTableSizing[] {
+  const out: VisualTableSizing[] = [];
+  // Single regex matching all RowStyle/ColumnStyle variants in source order:
+  //   new RowStyle() -> {type:AutoSize}
+  //   new RowStyle(SizeType.AutoSize) -> {type:AutoSize}
+  //   new RowStyle(SizeType.Percent, 50F) -> {type:Percent, value:50}
+  //   new RowStyle(SizeType.Absolute, 20F) -> {type:Absolute, value:20}
   const pattern = new RegExp(
-    `(?:this\\.)?${controlName}\\.${collection}\\.Add\\(\\s*new\\s+(?:System\\.Windows\\.Forms\\.)?(?:Row|Column)Style\\s*\\(\\s*(?:System\\.Windows\\.Forms\\.SizeType\\.)?(\\w+)\\s*,\\s*([\\d.]+)F?\\s*\\)`,
+    `(?:this\\.)?${controlName}\\.${collection}\\.Add\\(\\s*new\\s+(?:System\\.Windows\\.Forms\\.)?(?:Row|Column)Style\\s*\\(\\s*(?:(?:System\\.Windows\\.Forms\\.)?SizeType\\.)?(\\w+)?\\s*(?:,\\s*([\\d.]+)F?\\s*)?\\)`,
     "g"
   );
-  const out: VisualTableSizing[] = [];
   for (const match of source.matchAll(pattern)) {
-    const type = match[1] as VisualTableSizing["type"];
-    const value = Number(match[2]);
+    const type = (match[1] ?? "AutoSize") as VisualTableSizing["type"];
+    const value = match[2] != null ? Number(match[2]) : undefined;
     out.push({ type, value });
   }
   return out;
