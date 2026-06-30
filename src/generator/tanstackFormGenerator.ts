@@ -178,7 +178,14 @@ function collectFieldsWithLabels(controls: VisualControl[], fields: FormField[])
           const dist = dy + Math.abs(dx);
           if (dist < bestDist) {
             bestDist = dist;
-            bestLabel = cleanMnemonic(label.text ?? "");
+            const labelText = label.text ?? "";
+            if (labelText) {
+              bestLabel = cleanMnemonic(labelText);
+            } else if (label.name.startsWith("lbl")) {
+              bestLabel = label.name.slice(3);
+            } else {
+              bestLabel = label.name;
+            }
           }
         }
       }
