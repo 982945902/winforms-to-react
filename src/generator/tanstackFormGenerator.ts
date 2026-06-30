@@ -288,6 +288,7 @@ const defaultValues: ${componentName}Values = ${defaultValues};
 
 export default function ${componentName}() {${handlersBlock}
   const [submitted, setSubmitted] = useState<${componentName}Values | null>(null);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const form = useForm({
     defaultValues,
     onSubmit: async ({ value }) => {
@@ -298,8 +299,10 @@ export default function ${componentName}() {${handlersBlock}
           const key = err.path.join(".");
           errors[key] = err.message;
         }
+        setFormErrors(errors);
         return { formErrors: errors } as any;
       }
+      setFormErrors({});
       setSubmitted(parsed.data);
     }
   });
@@ -352,6 +355,7 @@ function generateFieldRender(f: FormField): string {
               onBlur={field.handleBlur}
             />
             <span>${escapeJsx(f.label)}</span>
+          {formErrors["${f.name}"] ? <span className="wf-field-error">{formErrors["${f.name}"]}</span> : null}
           </label>
         )}
       </form.Field>`;
@@ -369,6 +373,7 @@ function generateFieldRender(f: FormField): string {
             >
 ${opts}
             </select>
+          {formErrors["${f.name}"] ? <span className="wf-field-error">{formErrors["${f.name}"]}</span> : null}
           </div>
         )}
       </form.Field>`;
@@ -386,6 +391,7 @@ ${opts}
               ${f.minimum != null ? `min={${f.minimum}}` : ""}
               ${f.maximum != null ? `max={${f.maximum}}` : ""}
             />
+          {formErrors["${f.name}"] ? <span className="wf-field-error">{formErrors["${f.name}"]}</span> : null}
           </div>
         )}
       </form.Field>`;
@@ -401,6 +407,7 @@ ${opts}
               onChange={(e) => { field.handleChange(e.target.value)${afterChange}; }}
               onBlur={field.handleBlur}
             />
+          {formErrors["${f.name}"] ? <span className="wf-field-error">{formErrors["${f.name}"]}</span> : null}
           </div>
         )}
       </form.Field>`;
@@ -419,6 +426,7 @@ ${opts}
               ${f.maxLength != null ? `maxLength={${f.maxLength}}` : ""}
               ${f.readOnly ? "readOnly" : ""}
             />
+          {formErrors["${f.name}"] ? <span className="wf-field-error">{formErrors["${f.name}"]}</span> : null}
           </div>
         )}
       </form.Field>`;
@@ -436,6 +444,7 @@ ${opts}
               ${f.placeholder ? `placeholder="${escapeJsx(f.placeholder)}"` : ""}
               ${f.readOnly ? "readOnly" : ""}
             />
+          {formErrors["${f.name}"] ? <span className="wf-field-error">{formErrors["${f.name}"]}</span> : null}
           </div>
         )}
       </form.Field>`;
@@ -703,6 +712,7 @@ body { margin: 0; }
 }
 .wf-field textarea { min-height: 80px; resize: vertical; }
 .wf-field-check { display: flex; align-items: center; gap: 6px; flex-direction: row; }
+.wf-field-error { color: #d32f2f; font-size: 12px; margin-top: 2px; display: block; }
 .wf-form-actions { display: flex; gap: 8px; margin-top: 8px; }
 .wf-form-actions button { padding: 6px 16px; border: 1px solid #ccc; border-radius: 4px; background: #fff; cursor: pointer; font: inherit; }
 .wf-form-actions button[type="submit"] { background: #0078d4; color: #fff; border-color: #0078d4; }
