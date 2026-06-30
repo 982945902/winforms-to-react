@@ -285,7 +285,16 @@ export default function ${componentName}() {${handlersBlock}
   const form = useForm({
     defaultValues,
     onSubmit: async ({ value }) => {
-      setSubmitted(value);
+      const parsed = ${schemaName}.safeParse(value);
+      if (!parsed.success) {
+        const errors: Record<string, string> = {};
+        for (const err of parsed.error.issues) {
+          const key = err.path.join(".");
+          errors[key] = err.message;
+        }
+        return { formErrors: errors } as any;
+      }
+      setSubmitted(parsed.data);
     }
   });
 

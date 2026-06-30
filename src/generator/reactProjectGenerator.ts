@@ -261,7 +261,8 @@ function safeFileName(name: string) {
 }
 
 function winformsCompatTsx() {
-  return `import type { CSSProperties } from "react";
+  return `import { useState } from "react";
+import type { CSSProperties } from "react";
 
 export type VisualFont = {
   family?: string;
@@ -794,14 +795,17 @@ function WinToolStripContainer({ control, style }: { control: VisualControl; sty
 function WinTabControl({ control, style }: { control: VisualControl; style: CSSProperties }) {
   const children = control.children ?? [];
   const tabs = children.filter((c) => c.kind === "TabPage" || c.kind === "UserControl");
+  const [activeTab, setActiveTab] = useState(0);
   const tabStyle: CSSProperties = { ...style, display: "flex", flexDirection: "column", overflow: "hidden" };
   return (
     <div className="wf-tab" style={tabStyle}>
       <div className="wf-tab-strip">
-        {tabs.map((tab, i) => <span key={tab.name} className={"wf-tab-header" + (i === 0 ? " active" : "")}>{tab.text || tab.name}</span>)}
+        {tabs.map((tab, i) => (
+          <span key={tab.name} className={"wf-tab-header" + (i === activeTab ? " active" : "")} onClick={() => setActiveTab(i)}>{tab.text || tab.name}</span>
+        ))}
       </div>
       <div className="wf-tab-content" style={{ flex: 1, position: "relative", overflow: "auto" }}>
-        {tabs.length > 0 ? <WinControl control={tabs[0]} hostStyle={{ position: "absolute", inset: 0 }} /> : null}
+        {tabs.length > 0 && activeTab < tabs.length ? <WinControl key={tabs[activeTab].name} control={tabs[activeTab]} hostStyle={{ position: "absolute", inset: 0 }} /> : null}
       </div>
     </div>
   );
@@ -1296,6 +1300,7 @@ body {
 .wf-tab-header {
   padding: 4px 10px;
   font-size: 12px;
+  cursor: pointer;
   border: 1px solid #c0c0c0;
   border-bottom: none;
   background: #e8e8e8;
