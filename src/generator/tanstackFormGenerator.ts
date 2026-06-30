@@ -213,7 +213,7 @@ function generateZodSchema(fields: FormField[]): string {
       line += "z.string()";
     } else if (f.type === "select") {
       if (f.options && f.options.length > 0) {
-        const opts = f.options.map((o) => `"${o.replace(/"/g, '\\"')}"`).join(", ");
+        const opts = f.options.map((o) => `"${o.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r/g, "").replace(/\n/g, " ")}"`).join(", ");
         line += `z.enum([${opts}])`;
       } else {
         line += "z.string()";
@@ -305,7 +305,7 @@ function generateDefaultValues(fields: FormField[]): string {
     if (f.type === "boolean") return `  ${f.name}: ${v ?? false}`;
     if (f.type === "number") return `  ${f.name}: ${v ?? 0}`;
     if (f.type === "select") return `  ${f.name}: ${v != null ? `"${v}"` : `"${f.options?.[0] ?? ""}"`}`;
-    return `  ${f.name}: "${(v ?? "").toString().replace(/"/g, '\\"').replace(/\n/g, "\\n")}"`;
+    return `  ${f.name}: "${(v ?? "").toString().replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r\n/g, "\\n").replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t")}"`;
   });
   return `{\n${entries.join(",\n")}\n}`;
 }
