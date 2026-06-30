@@ -59,6 +59,7 @@ type FormField = {
   readOnly?: boolean;
   passwordChar?: string;
   tabIndex?: number;
+  changeHandler?: string;
 };
 
 function isInputControl(kind: string): boolean {
@@ -194,6 +195,14 @@ function collectFieldsWithLabels(controls: VisualControl[], fields: FormField[])
         }
       }
     }
+    // Extract change handler from events (TextChanged/SelectedIndexChanged/ValueChanged)
+    const changeEvent = fc.events?.find((e) =>
+      e.event === "TextChanged" || e.event === "SelectedIndexChanged" || e.event === "ValueChanged"
+    );
+    if (changeEvent) {
+      field.changeHandler = changeEvent.handler;
+      buttonHandlers.add(changeEvent.handler);
+    }
     fields.push(field);
   }
 }
@@ -315,6 +324,7 @@ function generateDefaultValues(fields: FormField[]): string {
 }
 
 function generateFieldRender(f: FormField): string {
+  const afterChange = f.changeHandler ? `; ${f.changeHandler}()` : "";
   const labelAttr = `label="${escapeJsx(f.label)}"`;
   if (f.type === "boolean") {
     return `      <form.Field name="${f.name}">
@@ -323,7 +333,7 @@ function generateFieldRender(f: FormField): string {
             <input
               type="checkbox"
               checked={field.state.value}
-              onChange={(e) => field.handleChange(e.target.checked)}
+              onChange={(e) => { field.handleChange(e.target.checked)${afterChange}; }}
               onBlur={field.handleBlur}
             />
             <span>${escapeJsx(f.label)}</span>
@@ -339,7 +349,7 @@ function generateFieldRender(f: FormField): string {
             <label>${escapeJsx(f.label)}</label>
             <select
               value={field.state.value}
-              onChange={(e) => field.handleChange(e.target.value as any)}
+              onChange={(e) => { field.handleChange(e.target.value as any)${afterChange}; }}
               onBlur={field.handleBlur}
             >
 ${opts}
@@ -373,7 +383,7 @@ ${opts}
             <input
               type="date"
               value={field.state.value ?? ""}
-              onChange={(e) => field.handleChange(e.target.value)}
+              onChange={(e) => { field.handleChange(e.target.value)${afterChange}; }}
               onBlur={field.handleBlur}
             />
           </div>
@@ -389,7 +399,7 @@ ${opts}
             <label>${escapeJsx(f.label)}</label>
             <textarea
               value={field.state.value}
-              onChange={(e) => field.handleChange(e.target.value)}
+              onChange={(e) => { field.handleChange(e.target.value)${afterChange}; }}
               onBlur={field.handleBlur}
               ${f.maxLength != null ? `maxLength={${f.maxLength}}` : ""}
               ${f.readOnly ? "readOnly" : ""}
@@ -405,7 +415,7 @@ ${opts}
             <input
               type="${inputType}"
               value={field.state.value}
-              onChange={(e) => field.handleChange(e.target.value)}
+              onChange={(e) => { field.handleChange(e.target.value)${afterChange}; }}
               onBlur={field.handleBlur}
               ${f.maxLength != null ? `maxLength={${f.maxLength}}` : ""}
               ${f.placeholder ? `placeholder="${escapeJsx(f.placeholder)}"` : ""}
