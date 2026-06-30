@@ -151,6 +151,7 @@ function collectFields(control: VisualControl, fields: FormField[]): void {
 // Track which Label controls have been associated with fields (to avoid
 // rendering them twice — once as field label, once as standalone label).
 const consumedLabels = new Set<string>();
+const buttonHandlers = new Set<string>();
 
 function collectFieldsWithLabels(controls: VisualControl[], fields: FormField[]): void {
   // First pass: collect all fields and all labels per container level
@@ -234,6 +235,7 @@ function generateFormComponent(form: VisualForm): string {
   fieldNameMap.clear();
   fieldNameCounter = 0;
   consumedLabels.clear();
+  buttonHandlers.clear();
   const fields: FormField[] = [];
   collectFieldsWithLabels(form.controls, fields);
 
@@ -256,6 +258,8 @@ function generateFormComponent(form: VisualForm): string {
     collectForMap(c);
   }
   const layoutRender = generateLayoutRender(form.controls, fieldByControlName);
+  const handlerStubs = [...buttonHandlers].map((h) => `  // TODO: migrate ${h} from WinForms\n  function ${h}() { /* stub */ }`).join("\n");
+  const handlersBlock = handlerStubs ? "\n" + handlerStubs + "\n" : "";
 
   return `import { useState } from "react";
 import { useForm } from "@tanstack/react-form";
@@ -267,7 +271,7 @@ type ${componentName}Values = z.infer<typeof ${schemaName}>;
 
 const defaultValues: ${componentName}Values = ${defaultValues};
 
-export default function ${componentName}() {
+export default function ${componentName}() {${handlersBlock}
   const [submitted, setSubmitted] = useState<${componentName}Values | null>(null);
   const form = useForm({
     defaultValues,
@@ -481,7 +485,10 @@ ${indent}</div>`;
     return `${indent}<label className="wf-label">${label}</label>`;
   }
   if (kind === "Button") {
-    return `${indent}<button type="button" className="wf-button">${label}</button>`;
+    const handler = control.events?.find((e) => e.event === "Click");
+    const onClick = handler ? ` onClick={() => ${handler.handler}()}` : "";
+    if (handler) buttonHandlers.add(handler.handler);
+    return `${indent}<button type="button" className="wf-button"${onClick}>${label}</button>`;
   }
   if (kind === "LinkLabel") {
     return `${indent}<a className="wf-link" href="#">${label}</a>`;
