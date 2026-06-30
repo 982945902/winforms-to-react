@@ -133,7 +133,23 @@ fonts, `ListViewItem`, and `TreeNode` are excluded from the visual tree.
 - No custom-control source analysis yet.
 - No pixel-perfect WinForms rendering guarantee.
 - No attempt to infer workflows from service/server code.
+- No `.resx` resource parsing — controls using `resources.ApplyResources`
+  for layout/text (common in ShareX) will have missing bounds and labels.
 
-The output is meant to be a compatibility preview and an inventory report. It is
-the first pass before choosing which forms deserve deeper hand migration or
-custom-control adapters.
+The output is meant to be a compatibility preview, an inventory report, and a
+TanStack Form starting point. It is the first pass before choosing which forms
+deserve deeper hand migration or custom-control adapters.
+
+## Verified on real projects
+
+| Project | Forms | Controls | Support | Render errors |
+|---------|-------|----------|---------|---------------|
+| dotnet/winforms | 13 | 351 | 100% | 0 |
+| SHFB | 19 | 311 | 100% | 0 |
+| ShareX | 96 | 2245 | 100% | 0 |
+| mRemoteNG | 48 | 592 | 100% | 0 |
+| gitextensions | 173 | 2472 | 100% | 0 |
+| PowerToys | 30 | 223 | 100% | 0 |
+
+Both output modes (compat preview + TanStack Form) pass `tsc --noEmit` with 0
+errors across all projects.
