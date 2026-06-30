@@ -155,23 +155,22 @@ const consumedLabels = new Set<string>();
 const buttonHandlers = new Set<string>();
 
 function collectFieldsWithLabels(controls: VisualControl[], fields: FormField[]): void {
-  // First pass: collect all fields and all labels per container level
-  const allControls: VisualControl[] = [];
-  function flatten(c: VisualControl) { allControls.push(c); (c.children ?? []).forEach(flatten); }
-  controls.forEach(flatten);
+  // Process each container level separately so Label-Field association only
+  // matches siblings within the same parent (not across container boundaries
+  // where relative coordinates are not comparable).
+  const siblingLabels = controls.filter((c) => c.kind === "Label" || c.kind === "LinkLabel");
+  const siblingFields = controls.filter((c) => isInputControl(c.kind));
 
-  const fieldControls = allControls.filter((c) => isInputControl(c.kind));
-  const labels = allControls.filter((c) => c.kind === "Label" || c.kind === "LinkLabel");
-
-  for (const fc of fieldControls) {
+  for (const fc of siblingFields) {
     const field = extractField(fc);
     if (!field) continue;
-    // Find closest label by position
-    if (fc.bounds && labels.length > 0) {
+    // Find closest label by position among siblings
+    if (fc.bounds && siblingLabels.length > 0) {
       let bestLabel: string | undefined;
       let bestDist = Infinity;
-      for (const label of labels) {
+      for (const label of siblingLabels) {
         if (!label.bounds) continue;
+        if (consumedLabels.has(label.name)) continue; // already used by another field
         // Label should be above or to the left, with similar y
         const dy = Math.abs(label.bounds.y - fc.bounds.y);
         const dx = label.bounds.x - fc.bounds.x;
@@ -186,7 +185,7 @@ function collectFieldsWithLabels(controls: VisualControl[], fields: FormField[])
       if (bestLabel) {
         field.label = bestLabel;
         // Mark the closest label as consumed
-        for (const label of labels) {
+        for (const label of siblingLabels) {
           if (label.text === bestLabel && label.bounds) {
             const dy = Math.abs(label.bounds.y - fc.bounds!.y);
             const dx = label.bounds.x - fc.bounds!.x;
@@ -204,6 +203,13 @@ function collectFieldsWithLabels(controls: VisualControl[], fields: FormField[])
       buttonHandlers.add(changeEvent.handler);
     }
     fields.push(field);
+  }
+
+  // Recurse into child containers
+  for (const control of controls) {
+    if (control.children && control.children.length > 0) {
+      collectFieldsWithLabels(control.children, fields);
+    }
   }
 }
 
@@ -522,7 +528,13 @@ function escapeJsx(text: string): string {
 
 // Strip WinForms mnemonic markers (&X) from display text.
 function cleanMnemonic(text: string): string {
-  return text.replace(/&([A-Za-z0-9])/g, "$1");
+  // Strip WinForms mnemonic markers (&X)
+  let cleaned = text.replace(/&([A-Za-z0-9])/g, "$1");
+  // Strip C# string concatenation artifacts that leak into Text property
+  cleaned = cleaned.replace(/"\s*\+\s*"/g, "");
+  // Collapse whitespace
+  cleaned = cleaned.replace(/\s+/g, " ").trim();
+  return cleaned;
 }
 
 // ---- Project scaffold ----
