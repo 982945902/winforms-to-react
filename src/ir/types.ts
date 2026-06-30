@@ -104,6 +104,7 @@ export type VisualAppearance = {
   value?: string | number;
   minimum?: number;
   maximum?: number;
+  increment?: number;
   format?: string;
   wordWrap?: boolean;
   scrollBars?: string;

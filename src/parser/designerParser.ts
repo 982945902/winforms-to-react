@@ -588,6 +588,9 @@ function assignControlProperty(control: MutableControl, property: string, value:
     case "Maximum":
       if (typeof value === "number") control.appearance.maximum = value;
       break;
+    case "Increment":
+      if (typeof value === "number") control.appearance.increment = value;
+      break;
     case "Format":
       control.appearance.format = String(value ?? "");
       break;

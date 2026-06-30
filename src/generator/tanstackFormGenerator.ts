@@ -53,6 +53,7 @@ type FormField = {
   maxLength?: number;
   minimum?: number;
   maximum?: number;
+  increment?: number;
   options?: string[];
   placeholder?: string;
   multiline?: boolean;
@@ -106,7 +107,7 @@ function extractField(control: VisualControl): FormField | null {
     return {
       name, label, type: "number",
       defaultValue: typeof a.value === "number" ? a.value : undefined,
-      minimum: a.minimum, maximum: a.maximum, readOnly: a.readOnly, tabIndex: control.tabIndex
+      minimum: a.minimum, maximum: a.maximum, increment: a.increment, readOnly: a.readOnly, tabIndex: control.tabIndex
     };
   }
   if (kind === "TrackBar") {
@@ -397,6 +398,7 @@ ${opts}
               onBlur={field.handleBlur}
               ${f.minimum != null ? `min={${f.minimum}}` : ""}
               ${f.maximum != null ? `max={${f.maximum}}` : ""}
+              ${f.increment != null ? `step={${f.increment}}` : ""}
             />
           {formErrors["${f.name}"] ? <span className="wf-field-error">{formErrors["${f.name}"]}</span> : null}
           </div>
