@@ -67,7 +67,7 @@ function isInputControl(kind: string): boolean {
     || kind === "CheckBox" || kind === "RadioButton"
     || kind === "ComboBox" || kind === "DomainUpDown" || kind === "ListBox" || kind === "CheckedListBox"
     || kind === "NumericUpDown" || kind === "DateTimePicker" || kind === "MonthCalendar"
-    || kind === "TrackBar" || kind === "ProgressBar";
+    || kind === "TrackBar";
 }
 
 // Sanitize a WinForms control name into a valid JS identifier for use as
