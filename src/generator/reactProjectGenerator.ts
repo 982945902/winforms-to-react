@@ -25,6 +25,7 @@ export async function generateReactProject(input: GenerateReactProjectInput): Pr
   await writeFile(join(input.outDir, "tsconfig.json"), tsconfigJson(), "utf8");
   await writeFile(join(input.outDir, "vite.config.ts"), viteConfig(), "utf8");
   await writeFile(join(input.outDir, "src", "main.tsx"), mainTsx(), "utf8");
+  await writeFile(join(input.outDir, "src", "vite-env.d.ts"), '/// <reference types="vite/client" />\n', "utf8");
   await writeFile(join(input.outDir, "src", "App.tsx"), appTsx(formFiles), "utf8");
   await writeFile(join(input.outDir, "src", "winformsCompat.tsx"), winformsCompatTsx(), "utf8");
   await writeFile(join(input.outDir, "src", "styles.css"), stylesCss(), "utf8");
@@ -88,7 +89,7 @@ function tsconfigJson() {
     "strict": true,
     "forceConsistentCasingInFileNames": true,
     "module": "ESNext",
-    "moduleResolution": "Node",
+    "moduleResolution": "Bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
@@ -1012,7 +1013,7 @@ function winStyle(control: VisualControl): CSSProperties {
   }
 
   if (a.textAlign) {
-    style.textAlign = a.textAlign.horizontal.toLowerCase();
+    style.textAlign = a.textAlign.horizontal.toLowerCase() as CSSProperties["textAlign"];
     // Vertical alignment via flex on the content box is applied per-control in
     // CSS; we expose a hint via CSS custom properties for themed components.
     style.alignItems = a.textAlign.vertical === "Top"
