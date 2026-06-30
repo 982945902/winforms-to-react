@@ -568,7 +568,7 @@ function WinControl({ control, hostStyle }: { control: VisualControl; hostStyle?
       return <div className="wf-month-calendar" style={style}><span>{label || control.name}</span></div>;
     case "NumericUpDown": {
       const a = control.appearance ?? {};
-      return <input className="wf-input wf-numeric" style={style} type="number" defaultValue={typeof a.value === "number" ? String(a.value) : label} readOnly={a.readOnly} min={a.minimum} max={a.maximum} aria-label={control.name} />;
+      return <input className="wf-input wf-numeric" style={style} type="number" defaultValue={typeof a.value === "number" ? String(a.value) : label} readOnly={a.readOnly} min={a.minimum} max={a.maximum} step={a.increment} aria-label={control.name} />;
     }
     case "CheckBox":
       return <label className="wf-check" style={style}><input type="checkbox" defaultChecked={control.appearance?.checked} /> <span>{label}</span></label>;
