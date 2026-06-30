@@ -96,8 +96,10 @@ export function applyResxToProps(controlName: string, resx: ResxData): ResxProps
   const enabled = props.get("Enabled");
   if (enabled) result.enabled = enabled === "True";
 
-  const visible = props.get("Visible");
-  if (visible) result.visible = visible === "True";
+  // Note: Visible from resx is intentionally NOT applied — WinForms designer
+  // sets Visible=False on collapsed/hidden design-time controls, which is not
+  // the runtime visibility state. Only apply Visible from Designer.cs direct
+  // assignment.
 
   const autoSize = props.get("AutoSize");
   if (autoSize) result.autoSize = autoSize === "True";
