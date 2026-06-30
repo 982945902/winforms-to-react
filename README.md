@@ -1,18 +1,21 @@
 # winforms-to-react
 
-Generic WinForms `.Designer.cs` to React compatibility-renderer converter.
+Generic WinForms `.Designer.cs` → React converter with two output modes:
 
-This is a visual migration tool, not a business-logic translator. The first
-milestone turns WinForms Designer files into a low-level Visual IR and emits a
-standalone React/Vite preview project with a WinForms-compatible renderer and
-an instance-level support coverage report.
+1. **Compat preview** (`--form compat`): a standalone React/Vite project with a
+   WinForms-compatible renderer. For teams to see the original UI in a browser.
+2. **TanStack Form** (`--form tanstack`): a runnable TanStack Form + Zod project
+   where each input control becomes a typed `form.Field` with auto-inferred Zod
+   validation, label association, event handler stubs, and layout containers.
+
+Both modes share the same parser and IR, so coverage and accuracy improvements
+benefit both outputs.
 
 ## Why this shape
 
 The target use case is old WinForms codebases where the first hard problem is
 getting screens to appear recognizably in a browser. Once the visual surface is
-stable, business logic, services, and workflow migration can be handled in later
-passes with more context.
+stable, the TanStack Form output gives a running starting point for migration.
 
 ## Commands
 
@@ -28,22 +31,28 @@ node dist/cli.js scan /path/to/winforms-source
 node dist/cli.js scan /path/to/winforms-source --json
 ```
 
-Generate a React/Vite preview project:
+Generate a **compat preview** (static visual):
 
 ```bash
-node dist/cli.js convert /path/to/winforms-source --out /tmp/wf2react-preview
+node dist/cli.js convert /path/to/winforms-source --out /tmp/preview
+```
+
+Generate a **TanStack Form** project (runnable forms):
+
+```bash
+node dist/cli.js convert /path/to/winforms-source --out /tmp/form --form tanstack
 ```
 
 Write a migration report:
 
 ```bash
-node dist/cli.js report /path/to/winforms-source --out /tmp/wf2react-report
+node dist/cli.js report /path/to/winforms-source --out /tmp/report
 ```
 
-Run the generated preview:
+Run the generated project:
 
 ```bash
-cd /tmp/wf2react-preview
+cd /tmp/preview   # or /tmp/form
 npm install
 npm run dev
 ```
