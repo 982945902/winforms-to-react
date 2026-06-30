@@ -133,8 +133,8 @@ fonts, `ListViewItem`, and `TreeNode` are excluded from the visual tree.
 - No custom-control source analysis yet.
 - No pixel-perfect WinForms rendering guarantee.
 - No attempt to infer workflows from service/server code.
-- No `.resx` resource parsing — controls using `resources.ApplyResources`
-  for layout/text (common in ShareX) will have missing bounds and labels.
+- No `.resx` binary resource parsing (images/icons). Text/layout properties
+  from `.resx` are now parsed and merged.
 
 The output is meant to be a compatibility preview, an inventory report, and a
 TanStack Form starting point. It is the first pass before choosing which forms
