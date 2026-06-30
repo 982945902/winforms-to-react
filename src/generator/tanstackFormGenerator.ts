@@ -594,7 +594,8 @@ function tsconfigJson(): string {
     "strict": true,
     "forceConsistentCasingInFileNames": true,
     "module": "ESNext",
-    "moduleResolution": "Node",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
@@ -632,7 +633,7 @@ createRoot(document.getElementById("root")!).render(
 function appTsx(forms: VisualForm[]): string {
   const imports = forms.map((f) => {
     const comp = f.name.replace(/[^A-Za-z0-9]/g, "");
-    return `import ${comp} from "./forms/${safeFileName(f.name)}.tsx";`;
+    return `import ${comp} from "./forms/${safeFileName(f.name)}";`;
   }).join("\n");
   const items = forms.map((f, i) => {
     const comp = f.name.replace(/[^A-Za-z0-9]/g, "");
