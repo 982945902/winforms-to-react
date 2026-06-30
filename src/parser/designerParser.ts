@@ -20,10 +20,13 @@ import type {
   VisualTableLayout,
   VisualTableSizing
 } from "../ir/types.js";
+import type { ResxData } from "./resxParser.js";
+import { applyResxToProps } from "./resxParser.js";
 
 export type ParseDesignerOptions = {
   sourcePath: string;
   baseKindMap?: Map<string, string>;
+  resxData?: ResxData;
 };
 
 type MutableControl = VisualControl & {
@@ -218,6 +221,12 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
   // and coverage report treat them as their base control (e.g. MyListView -> ListView).
   if (options.baseKindMap && options.baseKindMap.size > 0) {
     for (const control of controls.values()) resolveControlKind(control, options.baseKindMap);
+  }
+
+  // Merge .resx properties for controls that had layout set via
+  // resources.ApplyResources (common in ShareX) —补全 missing bounds/text/dock.
+  if (options.resxData) {
+    applyResxToControls(controls, form, options.resxData);
   }
 
   applyImplicitDock(controls, form);
@@ -897,6 +906,45 @@ function applyToolStripHierarchy(source: string, controls: Map<string, MutableCo
 // WinForms convention: MenuStrip without explicit Dock defaults to Top,
 // StatusStrip defaults to Bottom. Apply implicit dock so the layout engine
 // reserves space for them and Dock=Fill content doesn't overlap.
+// Merge .resx properties into controls that are missing bounds/text (set via
+// resources.ApplyResources in the Designer, actual values stored in .resx).
+function applyResxToControls(controls: Map<string, MutableControl>, form: VisualForm, resx: ResxData) {
+  for (const [name, control] of controls) {
+    const props = applyResxToProps(name, resx);
+    if (props.location && !control.bounds) {
+      control.bounds = { x: props.location.x, y: props.location.y, width: 0, height: 0 };
+    } else if (props.location && control.bounds) {
+      control.bounds.x = props.location.x;
+      control.bounds.y = props.location.y;
+    }
+    if (props.size && control.bounds) {
+      control.bounds.width = props.size.width;
+      control.bounds.height = props.size.height;
+    } else if (props.size && !control.bounds) {
+      control.bounds = { x: 0, y: 0, width: props.size.width, height: props.size.height };
+    }
+    if (props.text && !control.text) {
+      control.text = props.text;
+    }
+    if (props.dock && !control.dock) {
+      control.dock = props.dock;
+    }
+    if (props.anchor && !control.anchor) {
+      control.anchor = props.anchor;
+    }
+  }
+  // Also apply to form itself ($this)
+  const formProps = applyResxToProps("$this", resx);
+  if (formProps.clientSize && !form.clientSize) {
+    form.clientSize = formProps.clientSize;
+  } else if (formProps.size && !form.clientSize) {
+    form.clientSize = formProps.size;
+  }
+  if (formProps.text && !form.text) {
+    form.text = formProps.text;
+  }
+}
+
 function applyImplicitDock(controls: Map<string, MutableControl>, form: VisualForm) {
   // MenuStrip/StatusStrip without explicit Dock default to Top/Bottom.
   // Controls without bounds or Dock that were added to a container (not
