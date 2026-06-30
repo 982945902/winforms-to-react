@@ -41,13 +41,24 @@ export async function parseResx(filePath: string): Promise<ResxData> {
 // Merge resx properties into a control's bounds and text.
 // This is called after parsing the Designer.cs when a control has no bounds
 // (set via resources.ApplyResources instead of direct assignment).
-export function applyResxToProps(
-  controlName: string,
-  resx: ResxData
-): { location?: { x: number; y: number }; size?: { width: number; height: number }; clientSize?: { width: number; height: number }; text?: string; dock?: string; anchor?: string[] } {
+export type ResxProps = {
+  location?: { x: number; y: number };
+  size?: { width: number; height: number };
+  clientSize?: { width: number; height: number };
+  text?: string;
+  dock?: string;
+  anchor?: string[];
+  font?: { family: string; size: number };
+  enabled?: boolean;
+  visible?: boolean;
+  autoSize?: boolean;
+  padding?: { left: number; top: number; right: number; bottom: number };
+};
+
+export function applyResxToProps(controlName: string, resx: ResxData): ResxProps {
   const props = resx.get(controlName);
   if (!props) return {};
-  const result: { location?: { x: number; y: number }; size?: { width: number; height: number }; clientSize?: { width: number; height: number }; text?: string; dock?: string; anchor?: string[] } = {};
+  const result: ResxProps = {};
 
   const loc = props.get("Location");
   if (loc) {
@@ -74,6 +85,29 @@ export function applyResxToProps(
 
   const anchor = props.get("Anchor");
   if (anchor) result.anchor = anchor.split(",").map((s) => s.trim());
+
+  // Font: "Microsoft Sans Serif, 9.75pt" -> { family, size }
+  const font = props.get("Font");
+  if (font) {
+    const m = font.match(/^([^,]+),\s*([\d.]+)pt/);
+    if (m) result.font = { family: m[1], size: Number(m[2]) };
+  }
+
+  const enabled = props.get("Enabled");
+  if (enabled) result.enabled = enabled === "True";
+
+  const visible = props.get("Visible");
+  if (visible) result.visible = visible === "True";
+
+  const autoSize = props.get("AutoSize");
+  if (autoSize) result.autoSize = autoSize === "True";
+
+  // Padding: "4, 3, 4, 3" -> { left, top, right, bottom }
+  const padding = props.get("Padding");
+  if (padding) {
+    const parts = padding.split(",").map((s) => Number(s.trim()));
+    if (parts.length >= 4) result.padding = { left: parts[0], top: parts[1], right: parts[2], bottom: parts[3] };
+  }
 
   return result;
 }

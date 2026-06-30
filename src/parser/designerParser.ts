@@ -932,6 +932,21 @@ function applyResxToControls(controls: Map<string, MutableControl>, form: Visual
     if (props.anchor && !control.anchor) {
       control.anchor = props.anchor;
     }
+    if (props.font && !control.appearance.font) {
+      control.appearance.font = { family: props.font.family, size: props.font.size };
+    }
+    if (props.enabled != null && control.appearance.enabled == null) {
+      control.appearance.enabled = props.enabled;
+    }
+    if (props.visible != null && control.appearance.visible == null) {
+      control.appearance.visible = props.visible;
+    }
+    if (props.autoSize != null && control.autoSize == null) {
+      control.autoSize = props.autoSize;
+    }
+    if (props.padding && !control.appearance.padding) {
+      control.appearance.padding = props.padding;
+    }
   }
   // Also apply to form itself ($this)
   const formProps = applyResxToProps("$this", resx);
