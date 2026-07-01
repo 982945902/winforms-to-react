@@ -233,7 +233,10 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
   // Resolve custom control kinds to known WinForms base kinds so the renderer
   // and coverage report treat them as their base control (e.g. MyListView -> ListView).
   if (options.baseKindMap && options.baseKindMap.size > 0) {
-    for (const control of controls.values()) tagCustomProps(control, options.baseKindMap, options.controlProps);
+    for (const control of controls.values()) {
+      resolveControlKind(control, options.baseKindMap);
+      tagCustomProps(control, options.baseKindMap, options.controlProps);
+    }
   }
 
   applyImplicitDock(controls, form);
