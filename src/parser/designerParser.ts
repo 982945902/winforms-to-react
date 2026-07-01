@@ -1007,7 +1007,7 @@ function applyImplicitDock(controls: Map<string, MutableControl>, form: VisualFo
 }
 
 function isToolStripContainerKind(kind: string): boolean {
-  return kind === "MenuStrip" || kind === "ToolStrip" || kind === "StatusStrip" || kind.startsWith("ToolStrip");
+  return kind === "MenuStrip" || kind === "ToolStrip" || kind === "StatusStrip" || kind.startsWith("ToolStrip") || kind.startsWith("MenuStrip") || kind.startsWith("StatusStrip");
 }
 
 // Capture nested property assignments like `this.grid.DefaultCellStyle.BackColor = ...`
