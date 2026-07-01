@@ -652,29 +652,40 @@ function appTsx(forms: VisualForm[]): string {
     return `{ id: "form-${i}", name: ${JSON.stringify(f.text ?? f.name)}, component: ${comp} }`;
   }).join(",\n  ");
 
-  return `import { useState } from "react";
+  return `import { useState, useEffect } from "react";
 ${imports}
 
 const forms = [
   ${items}
 ];
 
+function getHashId() {
+  const hash = window.location.hash.replace("#", "");
+  return forms.find((f) => f.id === hash)?.id ?? forms[0]?.id ?? "";
+}
+
 export default function App() {
-  const [selectedId, setSelectedId] = useState(forms[0]?.id ?? "");
+  const [selectedId, setSelectedId] = useState(getHashId);
+  useEffect(() => {
+    const onHashChange = () => setSelectedId(getHashId());
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+  const go = (id: string) => { window.location.hash = id; };
   const selected = forms.find((f) => f.id === selectedId) ?? forms[0];
   const SelectedForm = selected?.component;
 
   return (
     <main className="app-shell">
       <aside className="app-sidebar">
-        <h1>WinForms → TanStack Form</h1>
-        <p>${forms.length} form${forms.length === 1 ? "" : "s"} converted</p>
+        <h1>WinForms → React</h1>
+        <p>{forms.length} forms</p>
         <nav>
           {forms.map((f) => (
             <button
               key={f.id}
               className={f.id === selectedId ? "active" : ""}
-              onClick={() => setSelectedId(f.id)}
+              onClick={() => go(f.id)}
             >
               {f.name}
             </button>
@@ -682,7 +693,7 @@ export default function App() {
         </nav>
       </aside>
       <section className="app-content">
-        {SelectedForm ? <SelectedForm /> : <p>No forms</p>}
+        {SelectedForm ? <SelectedForm key={selectedId} /> : <p>No forms</p>}
       </section>
     </main>
   );
