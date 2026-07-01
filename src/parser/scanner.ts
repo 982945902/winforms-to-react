@@ -22,7 +22,7 @@ export async function findDesignerFiles(inputPath: string): Promise<string[]> {
 
 export async function convertDesignerSources(inputPath: string): Promise<ConvertSourceResult> {
   const files = await findDesignerFiles(inputPath);
-  const baseKindMap = await collectBaseKindMap(inputPath);
+  const { baseKindMap, controlProps } = await collectBaseKindMap(inputPath);
   const forms: VisualForm[] = [];
   const reports: MigrationReport[] = [];
 
@@ -39,7 +39,7 @@ export async function convertDesignerSources(inputPath: string): Promise<Convert
         // resx parse failure is non-fatal
       }
     }
-    const result = parseDesignerSource(source, { sourcePath: file, baseKindMap, resxData });
+    const result = parseDesignerSource(source, { sourcePath: file, baseKindMap, resxData, controlProps });
     forms.push(result.form);
     reports.push(result.report);
   }
@@ -72,7 +72,7 @@ export { applyResxToProps };
 // Scan all non-Designer .cs files for `class X : Y` declarations and build a map
 // of custom class name -> base class short name. Used to resolve custom
 // WinForms controls to their known base control kind for rendering.
-async function collectBaseKindMap(inputPath: string): Promise<Map<string, string>> {
+async function collectBaseKindMap(inputPath: string): Promise<{ baseKindMap: Map<string, string>; controlProps: Map<string, Array<{ name: string; type: string }>> }> {
   const csFiles: string[] = [];
   const info = await stat(inputPath);
   if (info.isDirectory()) {
@@ -80,15 +80,15 @@ async function collectBaseKindMap(inputPath: string): Promise<Map<string, string
   }
 
   const map = new Map<string, string>();
-  const pattern = /^\s*(?:(?:public|internal|protected|private|sealed|abstract|static|partial)\s+)*class\s+([A-Za-z_]\w*)\s*:\s*([A-Za-z_][\w.<>]*)/gm;
+  const controlProps = new Map<string, Array<{ name: string; type: string }>>();
+  const classPattern = /^\s*(?:(?:public|internal|protected|private|sealed|abstract|static|partial)\s+)*class\s+([A-Za-z_]\w*)\s*:\s*([A-Za-z_][\w.<>]*)/gm;
+  const propPattern = /^\s*public\s+([A-Za-z_][\w.\[\]<>?]*)\s+([A-Za-z_]\w*)\s*(?:\{\s*get[^{]*\}|=|;)/gm;
+
   for (const file of csFiles) {
     const source = await readFile(file, "utf8");
-    for (const match of source.matchAll(pattern)) {
+    for (const match of source.matchAll(classPattern)) {
       const derived = match[1];
       const rawBase = match[2];
-      // Handle generic base: GenericBase<Button> -> if the type argument is a
-      // known WinForms control kind, map directly to it; otherwise fall back
-      // to the generic class name without type args.
       const genericMatch = rawBase.match(/^([A-Za-z_][\w.]*)<([A-Za-z_][\w.]*)>$/);
       if (genericMatch) {
         const genericName = genericMatch[1].split(".").pop() ?? genericMatch[1];
@@ -99,9 +99,23 @@ async function collectBaseKindMap(inputPath: string): Promise<Map<string, string
       }
       const base = rawBase.split(".").pop() ?? rawBase;
       if (derived !== base) map.set(derived, base);
+
+      // Extract visible public properties for placeholder display
+      const classStart = match.index!;
+      const nextClass = source.indexOf("\nclass ", classStart + 6);
+      const classBody = nextClass === -1 ? source.slice(classStart) : source.slice(classStart, nextClass);
+      const props: Array<{ name: string; type: string }> = [];
+      for (const pm of classBody.matchAll(propPattern)) {
+        const ptype = (pm[1].split(".").pop() ?? pm[1]).replace(/\?$/, "");
+        const pname = pm[2];
+        if (["GetHashCode", "Equals", "ToString", "GetType", "Dispose"].includes(pname)) continue;
+        if (ptype === "void" || pname.startsWith("On")) continue;
+        props.push({ name: pname, type: ptype });
+      }
+      if (props.length) controlProps.set(derived, props);
     }
   }
-  return map;
+  return { baseKindMap: map, controlProps };
 }
 
 async function walkCs(dir: string, files: string[]) {

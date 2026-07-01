@@ -27,6 +27,7 @@ export type ParseDesignerOptions = {
   sourcePath: string;
   baseKindMap?: Map<string, string>;
   resxData?: ResxData;
+  controlProps?: Map<string, Array<{ name: string; type: string }>>;
 };
 
 type MutableControl = VisualControl & {
@@ -232,7 +233,7 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
   // Resolve custom control kinds to known WinForms base kinds so the renderer
   // and coverage report treat them as their base control (e.g. MyListView -> ListView).
   if (options.baseKindMap && options.baseKindMap.size > 0) {
-    for (const control of controls.values()) resolveControlKind(control, options.baseKindMap);
+    for (const control of controls.values()) tagCustomProps(control, options.baseKindMap, options.controlProps);
   }
 
   applyImplicitDock(controls, form);
@@ -1540,6 +1541,16 @@ function inferKindFromName(name: string): string {
 
 // Recursively replace control.kind with its resolved base kind, preserving
 // the original kind in properties.originalKind for traceability.
+function tagCustomProps(control: MutableControl, baseKindMap?: Map<string, string>, controlProps?: Map<string, Array<{ name: string; type: string }>>): void {
+  // Attach custom control properties for smart placeholder rendering
+  if (controlProps && controlProps.size > 0) {
+    const kind = String(control.properties.originalKind || control.kind);
+    const props = controlProps.get(kind);
+    if (props && props.length) control.customProperties = props.slice(0, 8);
+  }
+  for (const child of control.children) tagCustomProps(child as MutableControl, baseKindMap, controlProps);
+}
+
 function resolveControlKind(control: MutableControl, baseKindMap: Map<string, string>): void {
   let resolved = resolveBaseKind(control.kind, baseKindMap);
   // If still Control (degraded base), try name-based heuristic to get a more

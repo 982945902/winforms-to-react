@@ -153,6 +153,7 @@ export type VisualControl = {
   orientation?: string;
   splitterDistance?: number;
   items?: string[];
+  customProperties?: Array<{ name: string; type: string }>;
   children: VisualControl[];
 };
 

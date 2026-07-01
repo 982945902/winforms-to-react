@@ -717,8 +717,27 @@ function WinControl({ control, hostStyle }: { control: VisualControl; hostStyle?
     case "Chart":
       return <div className="wf-unknown wf-degraded" style={style}><span>Chart</span><small>chart (degraded)</small></div>;
     default:
-      return <div className="wf-unknown" style={style}>{control.kind}: {control.name}</div>;
+      return <div className="wf-unknown" style={style}><CustomControlTag control={control} /></div>;
   }
+}
+
+// Smart placeholder for custom controls: shows type name + key properties
+function CustomControlTag({ control }: { control: VisualControl }) {
+  const original = control.properties?.originalKind;
+  const kind = original || control.kind;
+  const props = control.customProperties ?? [];
+  const titleText = props.length ? props.map(p => p.name + ": " + p.type).join("\n") : "Custom control";
+  return (
+    <div className="wf-custom-ctrl" title={titleText}>
+      <strong>{kind}</strong>
+      {props.length > 0 && (
+        <div className="wf-custom-props">
+          {props.slice(0, 3).map(p => <span key={p.name} className="wf-custom-prop">{p.name}</span>)}
+          {props.length > 3 && <span className="wf-custom-prop more">+{props.length - 3}</span>}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // FlowLayoutPanel: children flow according to FlowDirection and WrapContents.
@@ -1806,6 +1825,41 @@ body {
   border-style: dashed;
   color: #7a3300;
   background: #fff5e8;
+}
+
+.wf-custom-ctrl {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 4px;
+  font-size: 10px;
+  pointer-events: none;
+}
+
+.wf-custom-ctrl strong {
+  font-weight: 600;
+  color: #555;
+}
+
+.wf-custom-props {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.wf-custom-prop {
+  background: #e8e8ff;
+  border: 1px solid #b0b0d0;
+  padding: 0 3px;
+  border-radius: 2px;
+  font-size: 9px;
+  color: #444;
+  white-space: nowrap;
+}
+
+.wf-custom-prop.more {
+  background: #ffe8e8;
+  border-color: #d0b0b0;
 }
 
 .wf-degraded {
