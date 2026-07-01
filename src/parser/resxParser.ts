@@ -50,9 +50,9 @@ export type ResxProps = {
   anchor?: string[];
   font?: { family: string; size: number };
   enabled?: boolean;
-  visible?: boolean;
   autoSize?: boolean;
   padding?: { left: number; top: number; right: number; bottom: number };
+  dgvColumnHeaderText?: string; // DataGridView column header text from resx
 };
 
 export function applyResxToProps(controlName: string, resx: ResxData): ResxProps {
@@ -110,6 +110,10 @@ export function applyResxToProps(controlName: string, resx: ResxData): ResxProps
     const parts = padding.split(",").map((s) => Number(s.trim()));
     if (parts.length >= 4) result.padding = { left: parts[0], top: parts[1], right: parts[2], bottom: parts[3] };
   }
+
+  // DataGridView column header text: colName.HeaderText -> actual display text
+  const headerText = props.get("HeaderText");
+  if (headerText) result.dgvColumnHeaderText = headerText;
 
   return result;
 }

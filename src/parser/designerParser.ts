@@ -208,6 +208,12 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
 
   applyPropertyAssignments(stripped, controls, columns, form);
   applyEvents(stripped, controls);
+
+  // Apply resx column headers BEFORE applyColumns copies columns into grid.columns
+  if (options.resxData) {
+    applyResxToColumns(columns, options.resxData);
+  }
+
   applyColumns(stripped, controls, columns);
   applyListItems(stripped, controls);
   applyTableLayout(stripped, controls);
@@ -217,16 +223,16 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
   applyToolStripContainerPanels(stripped, controls);
   applyNestedControlProperties(stripped, controls);
 
-  // Resolve custom control kinds to known WinForms base kinds so the renderer
-  // and coverage report treat them as their base control (e.g. MyListView -> ListView).
-  if (options.baseKindMap && options.baseKindMap.size > 0) {
-    for (const control of controls.values()) resolveControlKind(control, options.baseKindMap);
-  }
-
   // Merge .resx properties for controls that had layout set via
   // resources.ApplyResources (common in ShareX) —补全 missing bounds/text/dock.
   if (options.resxData) {
     applyResxToControls(controls, form, options.resxData);
+  }
+
+  // Resolve custom control kinds to known WinForms base kinds so the renderer
+  // and coverage report treat them as their base control (e.g. MyListView -> ListView).
+  if (options.baseKindMap && options.baseKindMap.size > 0) {
+    for (const control of controls.values()) resolveControlKind(control, options.baseKindMap);
   }
 
   applyImplicitDock(controls, form);
@@ -909,6 +915,15 @@ function applyToolStripHierarchy(source: string, controls: Map<string, MutableCo
 // WinForms convention: MenuStrip without explicit Dock defaults to Top,
 // StatusStrip defaults to Bottom. Apply implicit dock so the layout engine
 // reserves space for them and Dock=Fill content doesn't overlap.
+function applyResxToColumns(columns: Map<string, MutableColumn>, resx: ResxData) {
+  for (const [name, column] of columns) {
+    const colProps = applyResxToProps(name, resx);
+    if (colProps.dgvColumnHeaderText && !column.headerText) {
+      column.headerText = colProps.dgvColumnHeaderText;
+    }
+  }
+}
+
 // Merge .resx properties into controls that are missing bounds/text (set via
 // resources.ApplyResources in the Designer, actual values stored in .resx).
 function applyResxToControls(controls: Map<string, MutableControl>, form: VisualForm, resx: ResxData) {
@@ -941,9 +956,6 @@ function applyResxToControls(controls: Map<string, MutableControl>, form: Visual
     if (props.enabled != null && control.appearance.enabled == null) {
       control.appearance.enabled = props.enabled;
     }
-    if (props.visible != null && control.appearance.visible == null) {
-      control.appearance.visible = props.visible;
-    }
     if (props.autoSize != null && control.autoSize == null) {
       control.autoSize = props.autoSize;
     }
@@ -951,6 +963,7 @@ function applyResxToControls(controls: Map<string, MutableControl>, form: Visual
       control.appearance.padding = props.padding;
     }
   }
+
   // Also apply to form itself ($this)
   const formProps = applyResxToProps("$this", resx);
   if (formProps.clientSize && !form.clientSize) {
