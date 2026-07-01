@@ -650,7 +650,7 @@ function WinControl({ control, hostStyle }: { control: VisualControl; hostStyle?
       return <div className={"wf-scrollbar " + (control.kind === "VScrollBar" ? "vertical" : "horizontal")} style={style} />;
     case "TrackBar": {
       const a = control.appearance ?? {};
-      return <input className="wf-trackbar" style={style} type="range" defaultValue={typeof a.value === "number" ? String(a.value) : undefined} min={a.minimum} max={a.maximum} />;
+      return <input className="wf-trackbar" style={style} type="range" defaultValue={typeof a.value === "number" ? String(a.value) : undefined} min={a.minimum} max={a.maximum} step={a.increment} />;
     }
     case "ProgressBar": {
       const a = control.appearance ?? {};
