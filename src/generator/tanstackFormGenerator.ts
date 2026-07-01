@@ -295,23 +295,23 @@ type ${componentName}Values = z.infer<typeof ${schemaName}>;
 const defaultValues: ${componentName}Values = ${defaultValues};
 
 export default function ${componentName}() {${handlersBlock}
-  const [submitted, setSubmitted] = useState<${componentName}Values | null>(null);
-  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [submitState, setSubmitState] = useState<"idle" | "submitting" | "success" | "error">("idle");
+  const [submitMsg, setSubmitMsg] = useState("");
   const form = useForm({
     defaultValues,
     onSubmit: async ({ value }) => {
+      setSubmitState("submitting");
+      setSubmitMsg("");
+      // Simulated API call — replace with real fetch/axios
+      await new Promise((r) => setTimeout(r, 600));
       const parsed = ${schemaName}.safeParse(value);
       if (!parsed.success) {
-        const errors: Record<string, string> = {};
-        for (const err of parsed.error.issues) {
-          const key = err.path.join(".");
-          errors[key] = err.message;
-        }
-        setFormErrors(errors);
-        return { formErrors: errors } as any;
+        setSubmitState("error");
+        setSubmitMsg("Validation failed: " + parsed.error.issues.map((i) => i.message).join(", "));
+        return;
       }
-      setFormErrors({});
-      setSubmitted(parsed.data);
+      setSubmitState("success");
+      setSubmitMsg("Form submitted successfully (mock)");
     }
   });
 
@@ -323,13 +323,13 @@ export default function ${componentName}() {${handlersBlock}
       <h2>${escapeJsx(form.text ?? form.name)}</h2>
 ${layoutRender}
       <div className="wf-form-actions">
-        <form.Subscribe selector={(state) => state.canSubmit}>
-          {(canSubmit) => <button type="submit" disabled={!canSubmit}>OK</button>}
-        </form.Subscribe>
-        <button type="button" onClick={() => form.reset()}>Reset</button>
+        <button type="submit" disabled={submitState === "submitting"}>
+          {submitState === "submitting" ? "Submitting..." : "OK"}
+        </button>
+        <button type="button" onClick={() => { form.reset(); setSubmitState("idle"); setSubmitMsg(""); }}>Reset</button>
       </div>
-      {submitted && (
-        <pre className="wf-form-result">{JSON.stringify(submitted, null, 2)}</pre>
+      {submitMsg && (
+        <div className={"wf-form-toast wf-form-toast-" + submitState}>{submitMsg}</div>
       )}
     </form>
   );
@@ -363,7 +363,6 @@ function generateFieldRender(f: FormField): string {
               onBlur={field.handleBlur}
             />
             <span>${escapeJsx(f.label)}</span>
-          {formErrors["${f.name}"] ? <span className="wf-field-error">{formErrors["${f.name}"]}</span> : null}
           </label>
         )}
       </form.Field>`;
@@ -381,7 +380,6 @@ function generateFieldRender(f: FormField): string {
             >
 ${opts}
             </select>
-          {formErrors["${f.name}"] ? <span className="wf-field-error">{formErrors["${f.name}"]}</span> : null}
           </div>
         )}
       </form.Field>`;
@@ -400,7 +398,6 @@ ${opts}
               ${f.maximum != null ? `max={${f.maximum}}` : ""}
               ${f.increment != null ? `step={${f.increment}}` : ""}
             />
-          {formErrors["${f.name}"] ? <span className="wf-field-error">{formErrors["${f.name}"]}</span> : null}
           </div>
         )}
       </form.Field>`;
@@ -416,7 +413,6 @@ ${opts}
               onChange={(e) => { field.handleChange(e.target.value)${afterChange}; }}
               onBlur={field.handleBlur}
             />
-          {formErrors["${f.name}"] ? <span className="wf-field-error">{formErrors["${f.name}"]}</span> : null}
           </div>
         )}
       </form.Field>`;
@@ -435,7 +431,6 @@ ${opts}
               ${f.maxLength != null ? `maxLength={${f.maxLength}}` : ""}
               ${f.readOnly ? "readOnly" : ""}
             />
-          {formErrors["${f.name}"] ? <span className="wf-field-error">{formErrors["${f.name}"]}</span> : null}
           </div>
         )}
       </form.Field>`;
@@ -453,7 +448,6 @@ ${opts}
               ${f.placeholder ? `placeholder="${escapeJsx(f.placeholder)}"` : ""}
               ${f.readOnly ? "readOnly" : ""}
             />
-          {formErrors["${f.name}"] ? <span className="wf-field-error">{formErrors["${f.name}"]}</span> : null}
           </div>
         )}
       </form.Field>`;
@@ -726,6 +720,17 @@ body { margin: 0; }
 .wf-form-actions button { padding: 6px 16px; border: 1px solid #ccc; border-radius: 4px; background: #fff; cursor: pointer; font: inherit; }
 .wf-form-actions button[type="submit"] { background: #0078d4; color: #fff; border-color: #0078d4; }
 .wf-form-result { background: #f0f0f0; padding: 12px; border-radius: 4px; font-size: 12px; white-space: pre-wrap; }
+
+.wf-form-toast {
+  padding: 8px 12px;
+  border-radius: 4px;
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.wf-form-toast-success { background: #e6f4ea; color: #1e8e3e; border: 1px solid #34a853; }
+.wf-form-toast-error { background: #fce8e6; color: #d93025; border: 1px solid #ea4335; }
+.wf-form-toast-submitting { background: #e8f0fe; color: #1a73e8; border: 1px solid #4285f4; }
 .wf-group { border: 1px solid #ccc; border-radius: 4px; padding: 12px; margin: 0; }
 .wf-group legend { padding: 0 6px; font-size: 13px; font-weight: 600; }
 .wf-panel { display: flex; flex-direction: column; gap: 8px; }
