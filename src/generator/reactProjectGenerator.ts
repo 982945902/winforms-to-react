@@ -620,18 +620,15 @@ function WinControl({ control, hostStyle }: { control: VisualControl; hostStyle?
     case "MenuStrip":
     case "ToolStrip":
     case "BindingNavigator":
+      return <WinMenuStrip control={control} style={style} />;
     case "StatusStrip":
-      return <div className={"wf-strip wf-strip-" + control.kind.toLowerCase()} style={style}>{children.length ? children.map((child) => {
-        const b = child.bounds ?? { x: 0, y: 0, width: 0, height: 0 };
-        const childStyle: CSSProperties = { position: "relative", height: b.height || undefined };
-        return <WinControl key={child.name} control={child} hostStyle={childStyle} />;
-      }) : (label || control.name)}</div>;
+      return <div className="wf-strip wf-strip-statusstrip" style={style}>{children.length ? children.map((child) => <WinControl key={child.name} control={child} />) : (label || control.name)}</div>;
     case "ToolStripButton":
     case "ToolStripDropDownButton":
     case "ToolStripSplitButton":
     case "ToolStripMenuItem":
       if (children.length > 0) {
-        return <div className="wf-strip-button wf-strip-dropdown" style={style} title={eventTitle(control)}>{label || control.name}<div className="wf-strip-dropdown-items">{children.map((child) => <WinControl key={child.name} control={child} />)}</div></div>;
+        return <WinDropdownMenuItem control={control} style={style} label={label} />;
       }
       return <button className="wf-strip-button" style={style} title={eventTitle(control)}>{label || control.name}</button>;
     case "ToolStripLabel":
@@ -770,7 +767,44 @@ function WinSplitContainer({ control, style }: { control: VisualControl; style: 
   );
 }
 
-// ToolStripContainer: 4 edge panels (Top/Bottom/Left/Right) + center ContentPanel.
+// MenuStrip: horizontal menu bar with hover-activated dropdowns
+function WinMenuStrip({ control, style }: { control: VisualControl; style: CSSProperties }) {
+  const children = control.children ?? [];
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
+  return (
+    <div className={"wf-strip wf-strip-" + control.kind.toLowerCase()} style={style}
+      onMouseLeave={() => setOpenMenu(null)}
+    >
+      {children.map((child) => {
+        const hasDropdown = (child.children ?? []).length > 0;
+        const isOpen = openMenu === child.name;
+        return (
+          <div key={child.name} className="wf-menu-item" onMouseEnter={() => hasDropdown && setOpenMenu(child.name)}>
+            {hasDropdown ? <WinDropdownMenuItem control={child} label={child.text ?? child.name} /> : <WinControl control={child} hostStyle={{ position: "relative" }} />}
+            {hasDropdown && isOpen && (
+              <div className="wf-menu-dropdown" onClick={() => setOpenMenu(null)}>
+                {(child.children ?? []).map((item) => <WinControl key={item.name} control={item} hostStyle={{ display: "block" }} />)}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Dropdown menu item: button that shows children on hover/click
+function WinDropdownMenuItem({ control, label }: { control: VisualControl; label: string }) {
+  const children = control.children ?? [];
+  return (
+    <div className="wf-menu-dropdown-item">
+      <button className="wf-strip-button" title={eventTitle(control)} style={{ position: "relative", width: "auto" }}>{label || control.name}</button>
+      <div className="wf-menu-dropdown">
+        {children.map((child) => <WinControl key={child.name} control={child} hostStyle={{ display: "block" }} />)}
+      </div>
+    </div>
+  );
+}
 // Children are distributed to the panel they were added to in the Designer.
 function WinToolStripContainer({ control, style }: { control: VisualControl; style: CSSProperties }) {
   const all = control.children ?? [];
@@ -1441,6 +1475,55 @@ body {
 
 .wf-strip-button:hover {
   border-color: #8db2e3;
+  background: #dcebff;
+}
+
+.wf-menu-item {
+  position: relative;
+  display: inline-block;
+}
+
+.wf-menu-dropdown-item {
+  position: relative;
+  display: inline-block;
+}
+
+.wf-menu-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 160px;
+  background: #ffffff;
+  border: 1px solid #b0b0b0;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  z-index: 9999;
+  padding: 2px 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.wf-menu-dropdown > * {
+  display: block;
+  position: relative !important;
+  width: 100% !important;
+  left: 0 !important;
+  top: 0 !important;
+}
+
+.wf-menu-dropdown .wf-strip-button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-radius: 0;
+  background: #ffffff;
+  padding: 4px 10px;
+  position: relative;
+  font: inherit;
+  font-size: 12px;
+}
+
+.wf-menu-dropdown .wf-strip-button:hover {
   background: #dcebff;
 }
 
