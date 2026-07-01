@@ -262,7 +262,7 @@ function safeFileName(name: string) {
 }
 
 function winformsCompatTsx() {
-  return `import { useState } from "react";
+  return `import { useState, useEffect } from "react";
 import type { CSSProperties } from "react";
 
 export type VisualFont = {
@@ -400,6 +400,16 @@ export function WinFormHost({ form }: { form: VisualForm }) {
     if (width === 0) width = 900;
     if (height === 0) height = 640;
   }
+  const [eventLog, setEventLog] = useState<string[]>([]);
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { control, handler: h } = (e as CustomEvent).detail;
+      const entry = control + "." + h + "()";
+      setEventLog((prev) => [entry, ...prev.slice(0, 4)]);
+    };
+    window.addEventListener("wf-event", handler);
+    return () => window.removeEventListener("wf-event", handler);
+  }, []);
   const childStyles = layoutChildren({ width, height }, form.controls);
   const border = form.formBorderStyle ?? "Sizable";
   const windowStyle: CSSProperties = { width, minHeight: height + 34 };
@@ -421,6 +431,11 @@ export function WinFormHost({ form }: { form: VisualForm }) {
           <WinControl key={control.name} control={control} hostStyle={childStyles[index]} />
         ))}
       </div>
+      {eventLog.length > 0 && (
+        <div className="wf-event-log" title="Event log">
+          {eventLog.map((e, i) => <div key={i}>{e}</div>)}
+        </div>
+      )}
     </article>
   );
 }
@@ -528,6 +543,15 @@ function WinControl({ control, hostStyle }: { control: VisualControl; hostStyle?
     ? { width: (hostStyle.width as number | undefined) ?? control.bounds?.width ?? 0, height: (hostStyle.height as number | undefined) ?? control.bounds?.height ?? 0 }
     : { width: control.bounds?.width ?? 0, height: control.bounds?.height ?? 0 };
   const childStyles = isContainerKind(control.kind) ? layoutChildren(ownSize, children) : [];
+
+  // Local interactive state for preview interactivity
+  const [localValue, setLocalValue] = useState<string | number | undefined>(
+    control.kind === "CheckBox" || control.kind === "RadioButton"
+      ? undefined
+      : (control.appearance?.value != null ? String(control.appearance.value) : label)
+  );
+  const [localChecked, setLocalChecked] = useState(control.appearance?.checked ?? false);
+  const [btnFlash, setBtnFlash] = useState(false);
   const hidden = control.appearance?.visible === false;
   if (hidden) return null;
 
@@ -539,41 +563,40 @@ function WinControl({ control, hostStyle }: { control: VisualControl; hostStyle?
       const a = control.appearance ?? {};
       if (a.multiline) {
         const taStyle: CSSProperties = { ...style, resize: a.readOnly ? "none" : "vertical" };
-        return <textarea className="wf-input wf-textarea" style={taStyle} defaultValue={label} readOnly={a.readOnly} maxLength={a.maxLength} aria-label={control.name} />;
+        return <textarea className="wf-input wf-textarea" style={taStyle} value={localValue ?? ""} onChange={(e) => setLocalValue(e.target.value)} readOnly={a.readOnly} maxLength={a.maxLength} aria-label={control.name} />;
       }
       const inputType = a.passwordChar ? "password" : "text";
       const placeholder = a.mask ? a.mask.replace(/0/g, "_").replace(/9/g, "_").replace(/[LA#?&><]/g, "_") : undefined;
-      return <input className="wf-input" style={style} type={inputType} defaultValue={label} readOnly={a.readOnly} maxLength={a.maxLength} placeholder={placeholder} aria-label={control.name} />;
+      return <input className="wf-input" style={style} type={inputType} value={localValue ?? ""} onChange={(e) => setLocalValue(e.target.value)} readOnly={a.readOnly} maxLength={a.maxLength} placeholder={placeholder} aria-label={control.name} />;
     }
     case "RichTextBox": {
       const a = control.appearance ?? {};
       const taStyle: CSSProperties = { ...style, resize: a.readOnly ? "none" : "vertical" };
-      return <textarea className="wf-input wf-richtext" style={taStyle} defaultValue={label} readOnly={a.readOnly} aria-label={control.name} />;
+      return <textarea className="wf-input wf-richtext" style={taStyle} value={localValue ?? ""} onChange={(e) => setLocalValue(e.target.value)} readOnly={a.readOnly} aria-label={control.name} />;
     }
     case "Button":
-      return <button className="wf-button" style={style} title={eventTitle(control)} disabled={control.appearance?.enabled === false}>{label || control.name}</button>;
+      return <button className={"wf-button" + (btnFlash ? " wf-button-flash" : "")} style={style} title={eventTitle(control)} disabled={control.appearance?.enabled === false} onClick={() => { setBtnFlash(true); setTimeout(() => setBtnFlash(false), 200); const handler = control.events?.find((e) => e.event === "Click")?.handler; if (handler) window.dispatchEvent(new CustomEvent("wf-event", { detail: { control: control.name, handler } })); }}>{label || control.name}</button>;
     case "ComboBox":
     case "DomainUpDown": {
       const a = control.appearance ?? {};
-      const dropdown = a.dropDownStyle === "DropDownList";
-      const selected = a.selectedIndex != null ? items[Math.min(a.selectedIndex, items.length - 1)] : undefined;
-      return <select className="wf-select" style={style} aria-label={control.name} defaultValue={selected}>{items.map((item) => <option key={item}>{item}</option>)}</select>;
+      const selected = a.selectedIndex != null ? items[Math.min(a.selectedIndex, items.length - 1)] : (items[0] ?? "");
+      return <select className="wf-select" style={style} aria-label={control.name} value={localValue ?? selected} onChange={(e) => setLocalValue(e.target.value)}>{items.map((item) => <option key={item}>{item}</option>)}</select>;
     }
     case "DateTimePicker": {
       const a = control.appearance ?? {};
       const inputType = a.format === "Time" ? "time" : a.format === "Short" ? "date" : "datetime-local";
-      return <input className="wf-input wf-date-picker" style={style} type={inputType} defaultValue={typeof a.value === "string" ? a.value : undefined} aria-label={control.name} />;
+      return <input className="wf-input wf-date-picker" style={style} type={inputType} value={localValue ?? ""} onChange={(e) => setLocalValue(e.target.value)} aria-label={control.name} />;
     }
     case "MonthCalendar":
       return <div className="wf-month-calendar" style={style}><span>{label || control.name}</span></div>;
     case "NumericUpDown": {
       const a = control.appearance ?? {};
-      return <input className="wf-input wf-numeric" style={style} type="number" defaultValue={typeof a.value === "number" ? String(a.value) : label} readOnly={a.readOnly} min={a.minimum} max={a.maximum} step={a.increment} aria-label={control.name} />;
+      return <input className="wf-input wf-numeric" style={style} type="number" value={localValue !== undefined ? String(localValue) : "0"} onChange={(e) => setLocalValue(e.target.value)} readOnly={a.readOnly} min={a.minimum} max={a.maximum} step={a.increment} aria-label={control.name} />;
     }
     case "CheckBox":
-      return <label className="wf-check" style={style}><input type="checkbox" defaultChecked={control.appearance?.checked} /> <span>{label}</span></label>;
+      return <label className="wf-check" style={style}><input type="checkbox" checked={localChecked} onChange={() => setLocalChecked(!localChecked)} /> <span>{label}</span></label>;
     case "RadioButton":
-      return <label className="wf-check" style={style}><input type="radio" defaultChecked={control.appearance?.checked} /> <span>{label}</span></label>;
+      return <label className="wf-check" style={style}><input type="radio" checked={localChecked} onChange={() => setLocalChecked(!localChecked)} /> <span>{label}</span></label>;
     case "GroupBox":
       return <fieldset className="wf-group" style={style}><legend>{label}</legend>{children.map((child, index) => <WinControl key={child.name} control={child} hostStyle={childStyles[index]} />)}</fieldset>;
     case "Panel":
@@ -1267,6 +1290,36 @@ body {
   background: linear-gradient(#ffffff, #e5e5e5);
   font: inherit;
   font-size: 12px;
+  cursor: pointer;
+}
+
+.wf-button:hover {
+  background: linear-gradient(#ffffff, #f0f0f0);
+}
+
+.wf-button-flash {
+  background: linear-gradient(#dcebff, #b8d4f0) !important;
+}
+
+.wf-event-log {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  background: rgba(0, 0, 0, 0.85);
+  color: #0f0;
+  font-family: monospace;
+  font-size: 10px;
+  padding: 4px 6px;
+  border-radius: 3px;
+  max-width: 200px;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+.wf-event-log div {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .wf-check {
