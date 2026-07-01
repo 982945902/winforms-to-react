@@ -608,7 +608,7 @@ function WinControl({ control, hostStyle }: { control: VisualControl; hostStyle?
     case "TableLayoutPanel":
       return <WinTableLayoutPanel control={control} style={style} />;
     case "SplitContainer":
-      return <WinSplitContainer control={control} style={style} />;
+      return <WinSplitContainer control={control} style={style} formSize={ownSize} />;
     case "ToolStripContainer":
       return <WinToolStripContainer control={control} style={style} />;
     case "Splitter":
@@ -743,25 +743,47 @@ function WinFlowLayoutPanel({ control, style }: { control: VisualControl; style:
 // SplitContainer: two panels separated by a splitter. Orientation Vertical
 // (default) splits left/right; Horizontal splits top/bottom. SplitterDistance
 // is the pixel size of Panel1.
-function WinSplitContainer({ control, style }: { control: VisualControl; style: CSSProperties }) {
+function WinSplitContainer({ control, style, formSize }: { control: VisualControl; style: CSSProperties; formSize?: { width: number; height: number } }) {
   const horizontal = (control.orientation ?? "Vertical") === "Horizontal";
-  const dist = control.splitterDistance ?? 0;
+  const size = horizontal ? (formSize?.height ?? control.bounds?.height ?? 400) : (formSize?.width ?? control.bounds?.width ?? 600);
+  const [splitPos, setSplitPos] = useState(control.splitterDistance || Math.round(size / 2));
+  const [dragging, setDragging] = useState(false);
   const all = control.children ?? [];
   const p1Names = new Set(control.panel1Children ?? []);
   const p2Names = new Set(control.panel2Children ?? []);
   const p1 = all.filter((c) => p1Names.has(c.name));
   const p2 = all.filter((c) => p2Names.has(c.name));
   const rest = all.filter((c) => !p1Names.has(c.name) && !p2Names.has(c.name));
-  const splitStyle: CSSProperties = { ...style, display: "flex" };
+  const splitStyle: CSSProperties = { ...style, display: "flex", cursor: dragging ? (horizontal ? "row-resize" : "col-resize") : undefined };
   if (horizontal) splitStyle.flexDirection = "column"; else splitStyle.flexDirection = "row";
   const panel1Style: CSSProperties = horizontal
-    ? { height: dist || "50%", overflow: "auto", position: "relative" }
-    : { width: dist || "50%", overflow: "auto", position: "relative" };
+    ? { height: splitPos, overflow: "auto", position: "relative", flexShrink: 0 }
+    : { width: splitPos, overflow: "auto", position: "relative", flexShrink: 0 };
   const panel2Style: CSSProperties = { flex: 1, overflow: "auto", position: "relative" };
+
+  const onMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setDragging(true);
+    const startPos = horizontal ? e.clientY : e.clientX;
+    const startSplit = splitPos;
+    const onMove = (ev: MouseEvent) => {
+      const delta = (horizontal ? ev.clientY : ev.clientX) - startPos;
+      const newPos = Math.max(20, Math.min(size - 20, startSplit + delta));
+      setSplitPos(newPos);
+    };
+    const onUp = () => {
+      setDragging(false);
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
+
   return (
     <div className="wf-split" style={splitStyle}>
       <div className="wf-split-panel" style={panel1Style}>{p1.map((c) => <WinControl key={c.name} control={c} hostStyle={{position:"relative"}} />)}</div>
-      <div className="wf-splitter-bar" aria-hidden="true" />
+      <div className={"wf-splitter-bar" + (dragging ? " dragging" : "")} onMouseDown={onMouseDown} title="Drag to resize" />
       <div className="wf-split-panel" style={panel2Style}>{p2.map((c) => <WinControl key={c.name} control={c} hostStyle={{position:"relative"}} />)}{rest.map((c) => <WinControl key={c.name} control={c} hostStyle={{position:"relative"}} />)}</div>
     </div>
   );
@@ -1841,6 +1863,13 @@ body {
   flex: 0 0 4px;
   background: linear-gradient(#d8d8d8, #c0c0c0);
   border: 1px solid #a0a0a0;
+  cursor: pointer;
+}
+
+.wf-splitter-bar:hover,
+.wf-splitter-bar.dragging {
+  background: linear-gradient(#d0e8ff, #a8d0f0);
+  border-color: #7aacd6;
 }
 
 .wf-splitter {
