@@ -667,7 +667,7 @@ function WinControl({ control, hostStyle }: { control: VisualControl; hostStyle?
       return <div className="wf-list" style={style}>{items.map((item) => <div key={item} className="wf-list-item">{item}</div>)}</div>;
     }
     case "TreeView":
-      return <div className="wf-list wf-tree" style={style}>{items.map((item) => <div key={item} className="wf-tree-node">{item}</div>)}</div>;
+      return <WinTreeView control={control} style={style} items={items} />;
     case "CheckedListBox":
       return <div className="wf-list" style={style}>{items.map((item) => <label key={item} className="wf-list-item wf-list-check"><input type="checkbox" /> {item}</label>)}</div>;
     case "LinkLabel":
@@ -913,6 +913,44 @@ function WinTabControl({ control, style }: { control: VisualControl; style: CSSP
       <div className="wf-tab-content" style={{ flex: 1, position: "relative", overflow: "auto" }}>
         {tabs.length > 0 && activeTab < tabs.length ? <WinControl key={tabs[activeTab].name} control={tabs[activeTab]} hostStyle={{ position: "absolute", inset: 0 }} /> : null}
       </div>
+    </div>
+  );
+}
+
+// TreeView: renders nested node hierarchy with indentation
+function WinTreeView({ control, items, style }: { control: VisualControl; items: string[]; style: CSSProperties }) {
+  const treeNodeChildren = control.treeNodeChildren ?? {};
+  const treeRootNodes = control.treeRootNodes;
+  
+  // If we have tree structure, render recursively; otherwise fallback to flat items
+  if (treeRootNodes && treeRootNodes.length) {
+    const nodeTexts = control.treeNodeTexts ?? {};
+    
+    function renderNode(nodeName: string, depth: number): React.ReactNode {
+      const text = nodeTexts[nodeName] || nodeName;
+      const kids = treeNodeChildren[nodeName];
+      return (
+        <div key={nodeName} className="wf-tree-branch" style={{ marginLeft: depth * 16 }}>
+          <div className="wf-tree-node">
+            {kids && kids.length > 0 && <span className="wf-tree-toggle">{"\u25BE"}</span>}
+            <span>{text}</span>
+          </div>
+          {kids && kids.map((child) => renderNode(child, depth + 1))}
+        </div>
+      );
+    }
+    
+    return (
+      <div className="wf-list wf-tree" style={style}>
+        {treeRootNodes.map((root) => renderNode(root, 0))}
+      </div>
+    );
+  }
+  
+  // Fallback to flat items
+  return (
+    <div className="wf-list wf-tree" style={style}>
+      {items.map((item) => <div key={item} className="wf-tree-node">{item}</div>)}
     </div>
   );
 }
@@ -1897,6 +1935,18 @@ body {
   height: 8px;
   border: 1px solid #888;
   background: #fff;
+}
+
+.wf-tree-branch {
+  position: relative;
+}
+
+.wf-tree-toggle {
+  display: inline-block;
+  width: 12px;
+  font-size: 9px;
+  color: #666;
+  cursor: default;
 }
 
 .wf-flow {

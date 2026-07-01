@@ -220,6 +220,7 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
   applyTableLayout(stripped, controls);
   applyControlHierarchy(stripped, controls, form);
   applyToolStripHierarchy(stripped, controls);
+  applyTreeViewHierarchy(stripped, controls);
   applySplitContainer(stripped, controls);
   applyToolStripContainerPanels(stripped, controls);
   applyNestedControlProperties(stripped, controls);
@@ -789,6 +790,60 @@ function extractStringLiterals(source: string): string[] {
 function appendItems(control: MutableControl, items: string[]) {
   if (items.length === 0) return;
   control.items = [...(control.items ?? []), ...items];
+}
+
+// Collect TreeView node hierarchy. Designer emits `parent.Nodes.Add(child)`,
+// `parent.Nodes.AddRange(new TreeNode[] { ... })`, and
+// `new TreeNode("text", new TreeNode[] { ... })`. Build the parent→child
+// mapping and the list of root nodes added directly to the TreeView.
+function applyTreeViewHierarchy(source: string, controls: Map<string, MutableControl>) {
+  for (const control of controls.values()) {
+    if (control.kind !== "TreeView") continue;
+
+    const children: Record<string, string[]> = {};
+    const roots: string[] = [];
+
+    // parent.Nodes.Add(child)
+    const addPattern = /(?:this\.)?([A-Za-z_]\w*)\.Nodes\.Add\(\s*(?:this\.)?([A-Za-z_]\w*)\s*\)/g;
+    for (const m of source.matchAll(addPattern)) {
+      if (!children[m[1]]) children[m[1]] = [];
+      children[m[1]].push(m[2]);
+    }
+
+    // parent.Nodes.AddRange(new TreeNode[] { a, b, ... })
+    const addRangePattern = /(?:this\.)?([A-Za-z_]\w*)\.Nodes\.AddRange\(\s*new\s+(?:[A-Za-z_][\w.]*\.)?TreeNode\[\]\s*\{([\s\S]*?)\}\s*\)/g;
+    for (const m of source.matchAll(addRangePattern)) {
+      const refs = [...m[2].matchAll(/(?:this\.)?([A-Za-z_]\w*)/g)].map(r => r[1]);
+      // If parent is the TreeView itself, these are root nodes
+      if (m[1] === control.name || m[1].startsWith(control.name)) {
+        roots.push(...refs);
+      } else {
+        if (!children[m[1]]) children[m[1]] = [];
+        children[m[1]].push(...refs);
+      }
+    }
+
+    // new TreeNode("text", new TreeNode[] { children })
+    const ctorPattern = /(?:[A-Za-z_][\w.]*\.)?TreeNode\s+([A-Za-z_]\w*)\s*=\s*new\s+(?:[A-Za-z_][\w.]*\.)?TreeNode\s*\(\s*@?"(?:[^"\\]|\\.|"")*"\s*,\s*new\s+(?:[A-Za-z_][\w.]*\.)?TreeNode\[\]\s*\{([\s\S]*?)\}/g;
+    for (const m of source.matchAll(ctorPattern)) {
+      const refs = [...m[2].matchAll(/(?:this\.)?([A-Za-z_]\w*)/g)].map(r => r[1]);
+      if (refs.length) {
+        if (!children[m[1]]) children[m[1]] = [];
+        children[m[1]].push(...refs);
+      }
+    }
+
+    if (Object.keys(children).length) control.treeNodeChildren = children;
+    if (roots.length) control.treeRootNodes = roots;
+
+    // Capture node variable name -> text mapping
+    const nodeTexts: Record<string, string> = {};
+    const namePattern = /(?:this\.)?([A-Za-z_]\w*)\s*=\s*new\s+(?:[A-Za-z_][\w.]*\.)?TreeNode\s*\(\s*@?"((?:[^"\\]|\\.|"")*)"/g;
+    for (const m of source.matchAll(namePattern)) {
+      nodeTexts[m[1]] = String(parseValue(m[2]));
+    }
+    if (Object.keys(nodeTexts).length) control.treeNodeTexts = nodeTexts;
+  }
 }
 
 // Collect TableLayoutPanel row/column styles and cell coordinates. Designer

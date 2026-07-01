@@ -245,6 +245,7 @@ function generateZodSchema(fields: FormField[]): string {
     } else {
       line += "z.string()";
       if (f.maxLength != null) line += `.max(${f.maxLength})`;
+      else if (!f.multiline) line += `.min(1)`;
     }
     line += ",";
     return line;
@@ -286,6 +287,7 @@ function generateFormComponent(form: VisualForm): string {
 
   return `import { useState } from "react";
 import { useForm } from "@tanstack/react-form";
+import { zodValidator } from "@tanstack/zod-form-adapter";
 import { z } from "zod";
 
 const ${schemaName} = ${zodSchema};
@@ -299,17 +301,15 @@ export default function ${componentName}() {${handlersBlock}
   const [submitMsg, setSubmitMsg] = useState("");
   const form = useForm({
     defaultValues,
+    validatorAdapter: zodValidator,
+    validators: {
+      onChange: ${schemaName}
+    },
     onSubmit: async ({ value }) => {
       setSubmitState("submitting");
       setSubmitMsg("");
       // Simulated API call — replace with real fetch/axios
       await new Promise((r) => setTimeout(r, 600));
-      const parsed = ${schemaName}.safeParse(value);
-      if (!parsed.success) {
-        setSubmitState("error");
-        setSubmitMsg("Validation failed: " + parsed.error.issues.map((i) => i.message).join(", "));
-        return;
-      }
       setSubmitState("success");
       setSubmitMsg("Form submitted successfully (mock)");
     }
@@ -361,8 +361,10 @@ function generateFieldRender(f: FormField): string {
               checked={field.state.value}
               onChange={(e) => { field.handleChange(e.target.checked)${afterChange}; }}
               onBlur={field.handleBlur}
+              style={field.state.meta.hasErrors ? { outline: "1px solid #d32f2f" } : undefined}
             />
             <span>${escapeJsx(f.label)}</span>
+            {field.state.meta.hasErrors && <span className="wf-field-error">{field.state.meta.errors[0]}</span>}
           </label>
         )}
       </form.Field>`;
@@ -374,12 +376,14 @@ function generateFieldRender(f: FormField): string {
           <div className="wf-field">
             <label>${escapeJsx(f.label)}</label>
             <select
+              style={field.state.meta.hasErrors ? { borderColor: "#d32f2f" } : undefined}
               value={field.state.value}
               onChange={(e) => { field.handleChange(e.target.value as any)${afterChange}; }}
               onBlur={field.handleBlur}
             >
 ${opts}
             </select>
+            {field.state.meta.hasErrors && <span className="wf-field-error">{field.state.meta.errors[0]}</span>}
           </div>
         )}
       </form.Field>`;
@@ -391,6 +395,7 @@ ${opts}
             <label>${escapeJsx(f.label)}</label>
             <input
               type="number"
+              style={field.state.meta.hasErrors ? { borderColor: "#d32f2f" } : undefined}
               value={field.state.value}
               onChange={(e) => field.handleChange(Number(e.target.value))}
               onBlur={field.handleBlur}
@@ -409,6 +414,7 @@ ${opts}
             <label>${escapeJsx(f.label)}</label>
             <input
               type="date"
+              style={field.state.meta.hasErrors ? { borderColor: "#d32f2f" } : undefined}
               value={field.state.value ?? ""}
               onChange={(e) => { field.handleChange(e.target.value)${afterChange}; }}
               onBlur={field.handleBlur}
@@ -425,6 +431,7 @@ ${opts}
           <div className="wf-field">
             <label>${escapeJsx(f.label)}</label>
             <textarea
+              style={field.state.meta.hasErrors ? { borderColor: "#d32f2f" } : undefined}
               value={field.state.value}
               onChange={(e) => { field.handleChange(e.target.value)${afterChange}; }}
               onBlur={field.handleBlur}
@@ -441,6 +448,7 @@ ${opts}
             <label>${escapeJsx(f.label)}</label>
             <input
               type="${inputType}"
+              style={field.state.meta.hasErrors ? { borderColor: "#d32f2f" } : undefined}
               value={field.state.value}
               onChange={(e) => { field.handleChange(e.target.value)${afterChange}; }}
               onBlur={field.handleBlur}
@@ -564,6 +572,7 @@ function packageJson(): string {
     },
     dependencies: {
       "@tanstack/react-form": "^0.40.0",
+      "@tanstack/zod-form-adapter": "^0.40.0",
       "zod": "^3.23.0",
       "react": "^19.0.0",
       "react-dom": "^19.0.0"

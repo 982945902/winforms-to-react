@@ -152,6 +152,10 @@ export type VisualControl = {
   contentPanelChildren?: string[];
   orientation?: string;
   splitterDistance?: number;
+  // TreeView nested node hierarchy.
+  treeRootNodes?: string[];
+  treeNodeTexts?: Record<string, string>; // Variable name -> display text          // Names of root-level tree nodes
+  treeNodeChildren?: Record<string, string[]>; // Parent node name -> child node names
   items?: string[];
   customProperties?: Array<{ name: string; type: string }>;
   children: VisualControl[];
