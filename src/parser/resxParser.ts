@@ -52,7 +52,9 @@ export type ResxProps = {
   enabled?: boolean;
   autoSize?: boolean;
   padding?: { left: number; top: number; right: number; bottom: number };
-  dgvColumnHeaderText?: string; // DataGridView column header text from resx
+  image?: string;
+  imageKey?: string;
+  dgvColumnHeaderText?: string;
 };
 
 export function applyResxToProps(controlName: string, resx: ResxData): ResxProps {
@@ -103,6 +105,12 @@ export function applyResxToProps(controlName: string, resx: ResxData): ResxProps
 
   const autoSize = props.get("AutoSize");
   if (autoSize) result.autoSize = autoSize === "True";
+
+  // Image references (ImageKey from resx for buttons/toolstrip items)
+  const image = props.get("Image");
+  if (image) result.image = image;
+  const imageKey = props.get("ImageKey");
+  if (imageKey) result.imageKey = imageKey;
 
   // Padding: "4, 3, 4, 3" -> { left, top, right, bottom }
   const padding = props.get("Padding");

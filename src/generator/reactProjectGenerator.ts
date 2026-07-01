@@ -339,6 +339,13 @@ export type VisualTableLayout = {
   rowSpan?: Record<string, number>;
 };
 
+function imagePlaceholder(control: VisualControl): string {
+  const img = control.appearance && (control.appearance.image || control.appearance.imageKey);
+  if (!img) return "";
+  const label = String(img).slice(0, 6);
+  return '<span className="wf-img-placeholder" title="Image: ' + escapeJsx(String(img)) + '">' + escapeJsx(label) + '</span>';
+}
+
 export type VisualControl = {
   kind: string;
   name: string;
