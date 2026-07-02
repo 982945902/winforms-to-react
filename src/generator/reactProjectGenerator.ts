@@ -655,11 +655,18 @@ function WinControl({ control, hostStyle }: { control: VisualControl; hostStyle?
       const view = control.appearance?.view ?? "List";
       const cols = control.columns ?? [];
       if (view === "Details" && cols.length > 0) {
+        const [sel, setSel] = useState(0);
         return (
           <div className="wf-grid wf-listview" style={style}>
             <table>
               <thead><tr>{cols.map((c) => <th key={c.name} style={{ width: c.width }}>{c.headerText || c.name}</th>)}</tr></thead>
-              <tbody>{items.map((item) => <tr key={item}>{cols.map((c) => <td key={c.name}>{item}</td>)}</tr>)}</tbody>
+              <tbody>
+                {[0, 1, 2].map((row) => (
+                  <tr key={row} onClick={() => setSel(row)} className={row === sel ? "wf-grid-row-selected" : ""} style={{ background: row % 2 === 1 ? "#f8f8f8" : undefined }}>
+                    {cols.map((c) => <td key={c.name}>&nbsp;</td>)}
+                  </tr>
+                ))}
+              </tbody>
             </table>
           </div>
         );
@@ -726,7 +733,7 @@ function CustomControlTag({ control }: { control: VisualControl }) {
   const original = control.properties?.originalKind;
   const kind = original || control.kind;
   const props = control.customProperties ?? [];
-  const titleText = props.length ? props.map(p => p.name + ": " + p.type).join("\n") : "Custom control";
+  const titleText = props.length ? props.map((p) => p.name + ": " + p.type).join(", ") : "Custom control";
   return (
     <div className="wf-custom-ctrl" title={titleText}>
       <strong>{kind}</strong>
@@ -960,6 +967,7 @@ function WinTreeView({ control, items, style }: { control: VisualControl; items:
 // runtime appearance; actual selected-object content is not available from
 // Designer files.
 function WinPropertyGrid({ control, style }: { control: VisualControl; style: CSSProperties }) {
+  const [openCats, setOpenCats] = useState<Record<string, boolean>>({});
   const rows = [
     { cat: "Appearance", props: [["BackColor", "Control"], ["ForeColor", "ControlText"], ["Font", "Segoe UI, 9pt"], ["Text", control.text ?? control.name]] },
     { cat: "Layout", props: [["Location", boundsText(control)], ["Size", sizeText(control)], ["Dock", (control.dock ?? "None")], ["Anchor", "Top, Left"]] },
@@ -974,18 +982,24 @@ function WinPropertyGrid({ control, style }: { control: VisualControl; style: CS
         <span className="wf-propgrid-btn" title="Events">\u26a1</span>
       </div>
       <div className="wf-propgrid-body">
-        {rows.map((row) => (
-          <div key={row.cat} className="wf-propgrid-cat">
-            <div className="wf-propgrid-cat-header">\u25be {row.cat}</div>
-            {row.props.map(([name, val]) => (
-              <div key={name} className="wf-propgrid-row">
-                <span className="wf-propgrid-name">{name}</span>
-                <span className="wf-propgrid-val">{val}</span>
+        {rows.map((row) => {
+          const open = openCats[row.cat] !== false;
+          return (
+            <div key={row.cat} className="wf-propgrid-cat">
+              <div className="wf-propgrid-cat-header" onClick={() => setOpenCats((prev) => ({ ...prev, [row.cat]: !open }))}>
+                {open ? "\u25be" : "\u25b8"} {row.cat}
               </div>
-            ))}
-          </div>
-        ))}
+              {open && row.props.map(([name, val]) => (
+                <div key={name} className="wf-propgrid-row">
+                  <span className="wf-propgrid-name">{name}</span>
+                  <span className="wf-propgrid-val">{val}</span>
+                </div>
+              ))}
+            </div>
+          );
+        })}
       </div>
+      <div className="wf-propgrid-help">PropertyGrid bound to {control.name}</div>
     </div>
   );
 }
@@ -1075,12 +1089,11 @@ function WinDataGridView({ control, style }: { control: VisualControl; style: CS
   const headerBackColor = (props["ColumnHeadersDefaultCellStyle.BackColor"] as VisualColor | undefined)?.cssColor;
   const headerForeColor = (props["ColumnHeadersDefaultCellStyle.ForeColor"] as VisualColor | undefined)?.cssColor;
   const selectionBackColor = (props["DefaultCellStyle.SelectionBackColor"] as VisualColor | undefined)?.cssColor;
+  const selectionForeColor = (props["DefaultCellStyle.SelectionForeColor"] as VisualColor | undefined)?.cssColor;
 
+  const [selectedRow, setSelectedRow] = useState(0);
   const gridStyle: CSSProperties = { ...style, background: bgColor ?? "#ffffff", borderColor: gridColor };
   const headerStyle: CSSProperties = { background: headerBackColor, color: headerForeColor };
-  const rowStyle = (index: number): CSSProperties => ({
-    background: index % 2 === 1 && altBackColor ? altBackColor : undefined
-  });
 
   return (
     <div className="wf-grid" style={gridStyle}>
@@ -1089,11 +1102,17 @@ function WinDataGridView({ control, style }: { control: VisualControl; style: CS
           <tr>{columns.map((column) => <th key={column.name} style={{ width: column.width, ...headerStyle }}>{column.headerText || column.name}</th>)}</tr>
         </thead>
         <tbody>
-          {[0, 1, 2].map((row) => (
-            <tr key={row} style={rowStyle(row)} className={selectionBackColor ? "wf-grid-row" : undefined}>
-              {columns.map((column) => <td key={column.name}>&nbsp;</td>)}
-            </tr>
-          ))}
+          {[0, 1, 2, 3].map((row) => {
+            const isAlt = row % 2 === 1 && altBackColor;
+            const isSel = row === selectedRow && selectionBackColor;
+            const rowBg = isSel ? selectionBackColor : isAlt ? altBackColor : undefined;
+            return (
+              <tr key={row} style={{ background: rowBg, color: isSel ? selectionForeColor : undefined }}
+                  className="wf-grid-row" onClick={() => setSelectedRow(row)}>
+                {columns.map((column) => <td key={column.name}>&nbsp;</td>)}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -1530,6 +1549,10 @@ body {
   border-right: 1px solid #ddd;
   border-bottom: 1px solid #eee;
 }
+
+.wf-grid-row { cursor: default; }
+.wf-grid-row:hover td { background: rgba(0, 120, 212, 0.05); }
+
 
 .wf-strip {
   box-sizing: border-box;

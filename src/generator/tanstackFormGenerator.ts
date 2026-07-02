@@ -288,7 +288,8 @@ function generateFormComponent(form: VisualForm): string {
   const handlerStubs = [...buttonHandlers].map((h) => `  // TODO: migrate ${h} from WinForms\n  function ${h}() { /* stub */ }`).join("\n");
   const handlersBlock = handlerStubs ? "\n" + handlerStubs + "\n" : "";
 
-  return `import { z } from "zod";
+  return `import { useState } from "react";
+import { z } from "zod";
 import { useZodForm } from "../lib/useZodForm";
 import { TextField, NumberField, SelectField, DateField, BooleanField } from "../lib/formFields";
 
@@ -353,7 +354,7 @@ function generateFieldRender(f: FormField): string {
   const labelAttr = `label="${escapeJsx(f.label)}"`;
   if (f.type === "boolean") {
     return `      <form.Field name="${f.name}">
-        {(field) => <BooleanField field={field} label=${JSON.stringify(f.label)} />}
+        {(field) => <BooleanField field={field} label={${JSON.stringify(f.label)}} />}
       </form.Field>`;
   }
   if (f.type === "select") {
