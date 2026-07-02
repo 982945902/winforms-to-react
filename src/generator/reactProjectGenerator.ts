@@ -1121,12 +1121,13 @@ function WinDataGridView({ control, style }: { control: VisualControl; style: CS
 
 function boundsStyle(control: VisualControl): CSSProperties {
   const bounds = control.bounds ?? { x: 0, y: 0, width: 100, height: 24 };
+  const autoSize = control.autoSize === true;
   return {
     position: "absolute",
     left: bounds.x,
     top: bounds.y,
-    width: bounds.width,
-    height: bounds.height
+    width: autoSize ? "auto" : bounds.width,
+    height: autoSize ? "auto" : bounds.height
   };
 }
 

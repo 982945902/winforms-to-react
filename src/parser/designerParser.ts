@@ -28,6 +28,7 @@ export type ParseDesignerOptions = {
   baseKindMap?: Map<string, string>;
   resxData?: ResxData;
   controlProps?: Map<string, Array<{ name: string; type: string }>>;
+  userControlDefs?: Map<string, VisualControl[]>;
 };
 
 type MutableControl = VisualControl & {
@@ -231,16 +232,62 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
     applyResxToControls(controls, form, options.resxData);
   }
 
-  // Resolve custom control kinds to known WinForms base kinds so the renderer
-  // and coverage report treat them as their base control (e.g. MyListView -> ListView).
-  if (options.baseKindMap && options.baseKindMap.size > 0) {
+
+
+  applyImplicitDock(controls, form);
+
+  // Resolve custom control kinds against UserControl definitions
+  if (options.userControlDefs && options.userControlDefs.size > 0) {
     for (const control of controls.values()) {
-      resolveControlKind(control, options.baseKindMap);
-      tagCustomProps(control, options.baseKindMap, options.controlProps);
+      if (SUPPORTED_CONTROLS.has(control.kind) || DEGRADED_CONTROLS.has(control.kind)) continue;
+      if (control.kind === control.properties?.originalKind || !control.properties?.originalKind) {
+        if (options.userControlDefs.has(control.kind)) {
+          control.properties.originalKind = control.kind;
+          control.kind = "UserControl";
+        }
+      }
     }
   }
 
-  applyImplicitDock(controls, form);
+  // Inline UserControl definitions: replace UserControl instances with their
+  // parsed child controls, translating coordinates to the parent's space.
+  if (options.userControlDefs) {
+    inlineUserControls(controls, form, options.userControlDefs);
+  }
+
+  function inlineUserControls(controls: Map<string, MutableControl>, form: VisualForm, defs: Map<string, VisualControl[]>) {
+    console.error("[UC] inlineUserControls: defs keys:", [...defs.keys()].slice(0,10));
+    for (const [name, control] of controls) {
+      if (control.kind !== "UserControl") { console.error("[UC] skip", name, "kind=",control.kind); continue; }
+      const children = defs.get(control.properties.originalKind as string ?? "") ?? defs.get(control.name);
+      if (children && children.length > 0) {
+        // UserControl instance location + child location = absolute position in parent
+        const ucBounds = control.bounds ?? { x: 0, y: 0, width: 0, height: 0 };
+        const inlinedChildren = children.map((child) => {
+          const childBounds = child.bounds ?? { x: 0, y: 0, width: 100, height: 24 };
+          return {
+            ...child,
+            name: name + "_" + child.name,
+            bounds: { x: ucBounds.x + childBounds.x, y: ucBounds.y + childBounds.y, width: childBounds.width, height: childBounds.height }
+          };
+        });
+        // Replace the UserControl with its children in the controls map
+        controls.delete(name);
+        for (const child of inlinedChildren) {
+          controls.set(child.name, child as MutableControl);
+        }
+        // Also update form.controls and children lists
+        const updateList = (list: VisualControl[]) => {
+          const idx = list.findIndex((c) => c.name === name);
+          if (idx >= 0) {
+            list.splice(idx, 1, ...(inlinedChildren as VisualControl[]));
+          }
+        };
+        updateList(form.controls);
+        for (const c of controls.values()) updateList(c.children);
+      }
+    }
+  }
 
   if (form.controls.length === 0) {
     const childNames = new Set([...controls.values()].flatMap((control) => control.children.map((child) => child.name)));
