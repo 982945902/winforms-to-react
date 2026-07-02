@@ -277,7 +277,8 @@ describe("generateReactProject", () => {
       });
 
       const compat = await readFile(join(outDir, "src", "winformsCompat.tsx"), "utf8");
-      expect(compat).toContain("function dockLayout");
+      expect(compat).toContain("function layoutChildren");
+      expect(compat).toContain("hasLeft && hasRight");
       expect(compat).toContain("dock === \"Top\"");
       expect(compat).toContain("dock === \"Bottom\"");
       expect(compat).toContain("dock === \"Left\"");

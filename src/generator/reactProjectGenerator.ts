@@ -392,21 +392,19 @@ export type VisualForm = {
 };
 
 export function WinFormHost({ form }: { form: VisualForm }) {
-  // If no ClientSize (common for UserControl-based forms), infer from the
-  // maximum right/bottom edge of all top-level child controls.
   let width = form.clientSize?.width ?? 0;
   let height = form.clientSize?.height ?? 0;
   if (!form.clientSize) {
     for (const c of form.controls) {
       const b = c.bounds;
-      if (b) {
-        width = Math.max(width, b.x + b.width);
-        height = Math.max(height, b.y + b.height);
-      }
+      if (b) { width = Math.max(width, b.x + b.width); height = Math.max(height, b.y + b.height); }
     }
     if (width === 0) width = 900;
     if (height === 0) height = 640;
   }
+  const windowState = form.windowState ?? "Normal";
+  const displaySurface = windowState !== "Minimized";
+  if (!displaySurface) { width = 160; height = 24; }
   const [eventLog, setEventLog] = useState<string[]>([]);
   useEffect(() => {
     const handler = (e: Event) => {
@@ -422,22 +420,30 @@ export function WinFormHost({ form }: { form: VisualForm }) {
   const windowStyle: CSSProperties = { width, minHeight: height + 34 };
   if (form.opacity != null) windowStyle.opacity = Math.max(0, Math.min(1, form.opacity));
   const borderless = border === "None";
-  if (borderless) {
-    windowStyle.border = "none";
-    windowStyle.boxShadow = "none";
-  } else if (border === "Fixed3D") {
-    windowStyle.border = "2px inset #c0c0c0";
-  } else if (border === "FixedSingle" || border === "FixedDialog") {
-    windowStyle.border = "1px solid #7f7f7f";
-  }
+  if (borderless) { windowStyle.border = "none"; windowStyle.boxShadow = "none"; }
+  else if (border === "Fixed3D") windowStyle.border = "2px inset #c0c0c0";
+  else if (border === "FixedSingle" || border === "FixedDialog") windowStyle.border = "1px solid #7f7f7f";
+  const hasMaximize = form.maximizeBox !== false && !borderless;
+  const hasMinimize = form.minimizeBox !== false && !borderless;
+  const hasClose = form.controlBox !== false;
   return (
-    <article className="wf-window" style={windowStyle}>
-      <header className="wf-titlebar">{form.text || form.name}</header>
-      <div className="wf-form-surface" style={{ width, height, backgroundImage: form.backgroundImage ? \`url(\${form.backgroundImage})\` : undefined }}>
-        {form.controls.map((control, index) => (
-          <WinControl key={control.name} control={control} hostStyle={childStyles[index]} />
-        ))}
-      </div>
+    <article className="wf-window" style={displaySurface ? windowStyle : { width: 160, height: 24 }}>
+      <header className="wf-titlebar">
+        {form.icon && <span className="wf-titlebar-icon" title="Form icon">\ud83d\udcc4</span>}
+        <span className="wf-titlebar-text">{form.text || form.name}</span>
+        <div className="wf-titlebar-buttons">
+          {displaySurface && hasMinimize && <button className="wf-titlebar-btn" title="Minimize">\u2500</button>}
+          {displaySurface && hasMaximize && <button className="wf-titlebar-btn" title="Maximize">\u25A1</button>}
+          {hasClose && <button className="wf-titlebar-btn" title="Close">\u2715</button>}
+        </div>
+      </header>
+      {displaySurface && (
+        <div className="wf-form-surface" style={{ width, height, backgroundImage: form.backgroundImage ? "url(" + form.backgroundImage + ")" : undefined }}>
+          {form.controls.map((control, index) => (
+            <WinControl key={control.name} control={control} hostStyle={childStyles[index]} />
+          ))}
+        </div>
+      )}
       {eventLog.length > 0 && (
         <div className="wf-event-log" title="Event log">
           {eventLog.map((e, i) => <div key={i}>{e}</div>)}
@@ -468,10 +474,7 @@ function layoutChildren(parent: { width: number; height: number }, children: Vis
     const hasBottom = anchor.has("Bottom");
     if (!hasLeft && !hasRight && !hasTop && !hasBottom) continue;
     const b = child.bounds ?? { x: 0, y: 0, width: 0, height: 0 };
-    let left = b.x;
-    let top = b.y;
-    let w = b.width;
-    let h = b.height;
+    let left = b.x, top = b.y, w = b.width, h = b.height;
     if (hasLeft && hasRight) {
       const rightEdge = parent.width - (b.x + b.width);
       left = b.x;
@@ -495,19 +498,14 @@ function layoutChildren(parent: { width: number; height: number }, children: Vis
 
 // WinForms docking passes take the parent client rectangle and reserve space
 // for side-docked children in z-order, then Fill consumes whatever remains.
-// We approximate z-order with the child array order; pure Top/Bottom/Left/Right
-// mixes that differ by insertion order may not be byte-identical to WinForms,
-// but covers the common MenuStrip(Top)+StatusStrip(Bottom)+Content(Fill) case.
 function dockLayout(parent: { width: number; height: number }, children: VisualControl[]): (CSSProperties | undefined)[] {
   const slot: LayoutBox = { x: 0, y: 0, width: parent.width, height: parent.height };
   const styles: (CSSProperties | undefined)[] = new Array(children.length).fill(undefined);
   const fillIndices: number[] = [];
-
   children.forEach((child, index) => {
     const dock = (child.dock ?? "None");
     if (dock === "None") return;
     if (dock === "Fill") { fillIndices.push(index); return; }
-
     const size = child.bounds ?? { x: 0, y: 0, width: 0, height: 0 };
     if (dock === "Top") {
       const h = size.height;
@@ -527,15 +525,8 @@ function dockLayout(parent: { width: number; height: number }, children: VisualC
       styles[index] = { position: "absolute", left: slot.x + slot.width, top: slot.y, width: w, height: slot.height };
     }
   });
-
   for (const index of fillIndices) {
-    styles[index] = {
-      position: "absolute",
-      left: slot.x,
-      top: slot.y,
-      width: Math.max(0, slot.width),
-      height: Math.max(0, slot.height)
-    };
+    styles[index] = { position: "absolute", left: slot.x, top: slot.y, width: Math.max(0, slot.width), height: Math.max(0, slot.height) };
   }
   return styles;
 }
@@ -627,6 +618,7 @@ function WinControl({ control, hostStyle }: { control: VisualControl; hostStyle?
     case "MenuStrip":
     case "ToolStrip":
     case "BindingNavigator":
+    case "ContextMenuStrip":
       return <WinMenuStrip control={control} style={style} />;
     case "StatusStrip":
       return <div className="wf-strip wf-strip-statusstrip" style={style}>{children.length ? children.map((child) => <WinControl key={child.name} control={child} />) : (label || control.name)}</div>;

@@ -283,14 +283,15 @@ describe("parseDesignerSource component classification", () => {
     expect(result.controlsByName.has("listViewItem1")).toBe(false);
     expect(result.report.supportedControls).toEqual([
       "BindingNavigator",
+      "ContextMenuStrip",
       "PrintPreviewControl",
       "ToolStripContainer"
     ]);
     expect(result.report.degradedControls).toEqual([]);
     expect(result.report.unknownControls).toEqual([]);
     expect(result.report.controlCoverage).toEqual({
-      total: 3,
-      supported: 3,
+      total: 4,
+      supported: 4,
       degraded: 0,
       unknown: 0,
       supportedPercent: 100,
@@ -298,6 +299,7 @@ describe("parseDesignerSource component classification", () => {
       unknownPercent: 0,
       byKind: [
         { kind: "BindingNavigator", count: 1, status: "supported" },
+        { kind: "ContextMenuStrip", count: 1, status: "supported" },
         { kind: "PrintPreviewControl", count: 1, status: "supported" },
         { kind: "ToolStripContainer", count: 1, status: "supported" }
       ]

@@ -75,6 +75,7 @@ const SUPPORTED_CONTROLS = new Set([
   "SplitContainer",
   "Splitter",
   "StatusStrip",
+  "ContextMenuStrip",
   "TabControl",
   "TabPage",
   "TableLayoutPanel",
@@ -109,7 +110,6 @@ const NON_CONTROL_KINDS = new Set([
   "ColorDialog",
   "ComponentResourceManager",
   "Container",
-  "ContextMenuStrip",
   "Cursor",
   "DataGridViewCellStyle",
   "ErrorProvider",
@@ -1124,7 +1124,8 @@ function applyImplicitDock(controls: Map<string, MutableControl>, form: VisualFo
 }
 
 function isToolStripContainerKind(kind: string): boolean {
-  return kind === "MenuStrip" || kind === "ToolStrip" || kind === "StatusStrip" || kind.startsWith("ToolStrip") || kind.startsWith("MenuStrip") || kind.startsWith("StatusStrip");
+  return kind === "MenuStrip" || kind === "ToolStrip" || kind === "StatusStrip" || kind === "ContextMenuStrip"
+    || kind.startsWith("ToolStrip") || kind.startsWith("MenuStrip") || kind.startsWith("StatusStrip");
 }
 
 // Capture nested property assignments like `this.grid.DefaultCellStyle.BackColor = ...`
