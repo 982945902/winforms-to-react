@@ -235,6 +235,17 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
 
 
   applyImplicitDock(controls, form);
+  console.error("[DBG] controls before resolution:", [...controls.values()].slice(0,5).map(c=>c.name+":"+c.kind).join(", "));
+  console.error("[DBG] baseKindMap size:", options.baseKindMap?.size);
+
+  // Resolve custom control kinds to known WinForms base kinds using baseKindMap
+  if (options.baseKindMap && options.baseKindMap.size > 0) {
+    for (const control of controls.values()) {
+      if (control.kind === control.properties?.originalKind || !control.properties?.originalKind) {
+        resolveControlKind(control, options.baseKindMap);
+      }
+    }
+  }
 
   // Resolve custom control kinds against UserControl definitions
   if (options.userControlDefs && options.userControlDefs.size > 0) {
