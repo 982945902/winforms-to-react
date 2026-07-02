@@ -111,7 +111,8 @@ describe("generateTanStackFormProject", () => {
       expect(formFile).toContain('type="password"');
 
       // Zod validation in onSubmit
-      expect(formFile).toContain("safeParse");
+      expect(formFile).toContain("useZodForm");
+      expect(formFile).toContain("TextField");
       expect(formFile).toContain("LoginFormSchema");
 
       // form.Field bindings
