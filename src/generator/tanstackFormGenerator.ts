@@ -11,6 +11,7 @@ export type GenerateTanStackFormInput = {
 export async function generateTanStackFormProject(input: GenerateTanStackFormInput): Promise<void> {
   await mkdir(input.outDir, { recursive: true });
   await mkdir(join(input.outDir, "src"), { recursive: true });
+  await mkdir(join(input.outDir, "src", "lib"), { recursive: true });
   await mkdir(join(input.outDir, "src", "forms"), { recursive: true });
   await mkdir(join(input.outDir, "forms"), { recursive: true });
 
@@ -32,6 +33,8 @@ export async function generateTanStackFormProject(input: GenerateTanStackFormInp
   await writeFile(join(input.outDir, "src", "main.tsx"), mainTsx(), "utf8");
   await writeFile(join(input.outDir, "src", "App.tsx"), appTsx(input.forms), "utf8");
   await writeFile(join(input.outDir, "src", "styles.css"), stylesCss(), "utf8");
+  await writeFile(join(input.outDir, "src", "lib", "formFields.tsx"), formFieldsTsx(), "utf8");
+  await writeFile(join(input.outDir, "src", "lib", "useZodForm.ts"), useZodFormTs(), "utf8");
 }
 
 function safeFileName(name: string): string {
@@ -285,10 +288,9 @@ function generateFormComponent(form: VisualForm): string {
   const handlerStubs = [...buttonHandlers].map((h) => `  // TODO: migrate ${h} from WinForms\n  function ${h}() { /* stub */ }`).join("\n");
   const handlersBlock = handlerStubs ? "\n" + handlerStubs + "\n" : "";
 
-  return `import { useState } from "react";
-import { useForm } from "@tanstack/react-form";
-import { zodValidator } from "@tanstack/zod-form-adapter";
-import { z } from "zod";
+  return `import { z } from "zod";
+import { useZodForm } from "../lib/useZodForm";
+import { TextField, NumberField, SelectField, DateField, BooleanField } from "../lib/formFields";
 
 const ${schemaName} = ${zodSchema};
 
@@ -299,12 +301,9 @@ const defaultValues: ${componentName}Values = ${defaultValues};
 export default function ${componentName}() {${handlersBlock}
   const [submitState, setSubmitState] = useState<"idle" | "submitting" | "success" | "error">("idle");
   const [submitMsg, setSubmitMsg] = useState("");
-  const form = useForm({
+  const form = useZodForm({
     defaultValues,
-    validatorAdapter: zodValidator,
-    validators: {
-      onChange: ${schemaName}
-    },
+    schema: ${schemaName},
     onSubmit: async ({ value }) => {
       setSubmitState("submitting");
       setSubmitMsg("");
@@ -354,38 +353,12 @@ function generateFieldRender(f: FormField): string {
   const labelAttr = `label="${escapeJsx(f.label)}"`;
   if (f.type === "boolean") {
     return `      <form.Field name="${f.name}">
-        {(field) => (
-          <label className="wf-field wf-field-check">
-            <input
-              type="checkbox"
-              checked={field.state.value}
-              onChange={(e) => { field.handleChange(e.target.checked)${afterChange}; }}
-              onBlur={field.handleBlur}
-              style={field.state.meta.hasErrors ? { outline: "1px solid #d32f2f" } : undefined}
-            />
-            <span>${escapeJsx(f.label)}</span>
-            {field.state.meta.hasErrors && <span className="wf-field-error">{field.state.meta.errors[0]}</span>}
-          </label>
-        )}
+        {(field) => <BooleanField field={field} label=${JSON.stringify(f.label)} />}
       </form.Field>`;
   }
   if (f.type === "select") {
-    const opts = (f.options ?? []).map((o) => `              <option key="${escapeJsx(o)}" value="${escapeJsx(o)}">${escapeJsx(o)}</option>`).join("\n");
     return `      <form.Field name="${f.name}">
-        {(field) => (
-          <div className="wf-field">
-            <label>${escapeJsx(f.label)}</label>
-            <select
-              style={field.state.meta.hasErrors ? { borderColor: "#d32f2f" } : undefined}
-              value={field.state.value}
-              onChange={(e) => { field.handleChange(e.target.value as any)${afterChange}; }}
-              onBlur={field.handleBlur}
-            >
-${opts}
-            </select>
-            {field.state.meta.hasErrors && <span className="wf-field-error">{field.state.meta.errors[0]}</span>}
-          </div>
-        )}
+        {(field) => <SelectField field={field} label=${JSON.stringify(f.label)} options={${JSON.stringify([])}} />}
       </form.Field>`;
   }
   if (f.type === "number") {
@@ -764,5 +737,120 @@ body { margin: 0; }
 .wf-label { font-size: 13px; color: #555; }
 .wf-button { padding: 6px 16px; border: 1px solid #ccc; border-radius: 4px; background: #fff; cursor: pointer; font: inherit; }
 .wf-link { color: #0066cc; text-decoration: underline; cursor: pointer; }
+`;
+}
+// ---- Shared library modules ----
+
+function formFieldsTsx(): string {
+  return `import type { FieldApi } from "@tanstack/react-form";
+
+type FieldProps = {
+  field: FieldApi<any, any, any, any>;
+  label: string;
+  style?: React.CSSProperties;
+};
+
+export function TextField({ field, label, style }: FieldProps) {
+  return (
+    <div className="wf-field">
+      <label>{label}</label>
+      <input
+        style={field.state.meta.hasErrors ? { ...style, borderColor: "#d32f2f" } : style}
+        type="text"
+        value={field.state.value}
+        onChange={(e) => field.handleChange(e.target.value)}
+        onBlur={field.handleBlur}
+        maxLength={field.fieldMeta?.validator?.lastAutoFocus as any}
+      />
+      {field.state.meta.hasErrors && <span className="wf-field-error">{field.state.meta.errors[0]}</span>}
+    </div>
+  );
+}
+
+export function NumberField({ field, label, style }: FieldProps) {
+  return (
+    <div className="wf-field">
+      <label>{label}</label>
+      <input
+        style={field.state.meta.hasErrors ? { ...style, borderColor: "#d32f2f" } : style}
+        type="number"
+        value={field.state.value}
+        onChange={(e) => field.handleChange(Number(e.target.value))}
+        onBlur={field.handleBlur}
+      />
+      {field.state.meta.hasErrors && <span className="wf-field-error">{field.state.meta.errors[0]}</span>}
+    </div>
+  );
+}
+
+export function SelectField({ field, label, options, style }: FieldProps & { options?: string[] }) {
+  return (
+    <div className="wf-field">
+      <label>{label}</label>
+      <select
+        style={field.state.meta.hasErrors ? { ...style, borderColor: "#d32f2f" } : style}
+        value={field.state.value}
+        onChange={(e) => field.handleChange(e.target.value)}
+        onBlur={field.handleBlur}
+      >
+        {(options ?? []).map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+      </select>
+      {field.state.meta.hasErrors && <span className="wf-field-error">{field.state.meta.errors[0]}</span>}
+    </div>
+  );
+}
+
+export function DateField({ field, label, style }: FieldProps) {
+  return (
+    <div className="wf-field">
+      <label>{label}</label>
+      <input
+        style={field.state.meta.hasErrors ? { ...style, borderColor: "#d32f2f" } : style}
+        type="date"
+        value={field.state.value ?? ""}
+        onChange={(e) => field.handleChange(e.target.value)}
+        onBlur={field.handleBlur}
+      />
+      {field.state.meta.hasErrors && <span className="wf-field-error">{field.state.meta.errors[0]}</span>}
+    </div>
+  );
+}
+
+export function BooleanField({ field, label, style }: FieldProps) {
+  return (
+    <label className="wf-field wf-field-check" style={style}>
+      <input
+        type="checkbox"
+        checked={field.state.value}
+        onChange={(e) => field.handleChange(e.target.checked)}
+        onBlur={field.handleBlur}
+      />
+      <span>{label}</span>
+      {field.state.meta.hasErrors && <span className="wf-field-error">{field.state.meta.errors[0]}</span>}
+    </label>
+  );
+}
+`;
+}
+
+function useZodFormTs(): string {
+  return `import { useForm } from "@tanstack/react-form";
+import { zodValidator } from "@tanstack/zod-form-adapter";
+import type { z } from "zod";
+
+type UseZodFormOptions<T extends z.ZodObject<any>> = {
+  defaultValues: z.infer<T>;
+  schema: T;
+  onSubmit: (options: { value: z.infer<T> }) => Promise<void> | void;
+};
+
+export function useZodForm<T extends z.ZodObject<any>>(options: UseZodFormOptions<T>) {
+  return useForm({
+    defaultValues: options.defaultValues,
+    validatorAdapter: zodValidator,
+    validators: { onChange: options.schema },
+    onSubmit: options.onSubmit
+  });
+}
 `;
 }
