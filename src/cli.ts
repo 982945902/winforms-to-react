@@ -3,14 +3,13 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { generateReactProject } from "./generator/reactProjectGenerator.js";
 import { generateTanStackFormProject } from "./generator/tanstackFormGenerator.js";
-import { generateStaticHtmlProject } from "./generator/staticHtmlGenerator.js";
 import { convertDesignerSources, findDesignerFiles } from "./parser/scanner.js";
 
 type CliOptions = {
   input?: string;
   outDir?: string;
   format?: "json" | "text";
-  formEngine?: "compat" | "tanstack" | "static";
+  formEngine?: "compat" | "tanstack";
 };
 
 async function main() {
@@ -52,10 +51,7 @@ async function runConvert(options: CliOptions) {
   const input = resolveRequiredInput(options);
   const outDir = resolve(options.outDir ?? "out/wf2react-preview");
   const result = await convertDesignerSources(input);
-  if (options.formEngine === "static") {
-    await generateStaticHtmlProject({ outDir, forms: result.forms, report: result.report });
-    console.log(`Exported ${result.report.formsConverted} form(s) to static HTML`);
-  } else if (options.formEngine === "tanstack") {
+  if (options.formEngine === "tanstack") {
     await generateTanStackFormProject({ outDir, forms: result.forms, report: result.report });
     console.log(`Converted ${result.report.formsConverted} form(s) to TanStack Form`);
   } else {
@@ -88,7 +84,7 @@ function parseOptions(args: string[]): CliOptions {
     } else if (arg === "--json") {
       options.format = "json";
     } else if (arg === "--form") {
-      options.formEngine = args[++i] as "tanstack" | "static";
+      options.formEngine = args[++i] as "tanstack";
     } else if (!options.input) {
       options.input = arg;
     } else {
@@ -113,7 +109,7 @@ Usage:
   wf2react convert <file-or-folder> --out <dir> [--form tanstack]
   wf2react report <file-or-folder> [--out <dir>]
 
-  --form tanstack  Generate TanStack Form + Zod instead of static preview
+  --form tanstack  Generate TanStack Form + Zod instead of compatibility preview
 `);
 }
 

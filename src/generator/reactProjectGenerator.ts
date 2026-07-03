@@ -906,7 +906,7 @@ function WinTabControl({ control, style }: { control: VisualControl; style: CSSP
     <div className="wf-tab" style={tabStyle}>
       <div className="wf-tab-strip">
         {tabs.map((tab, i) => (
-          <span key={tab.name} className={"wf-tab-header" + (i === activeTab ? " active" : "")} onClick={() => setActiveTab(i)}>{tab.text || tab.name}</span>
+          <button key={tab.name} className={"wf-tab-header" + (i === activeTab ? " active" : "")} onClick={() => setActiveTab(i)}>{tab.text || tab.name}</button>
         ))}
       </div>
       <div className="wf-tab-content" style={{ flex: 1, position: "relative", overflow: "auto" }}>
@@ -1484,15 +1484,19 @@ body {
 }
 
 .wf-tab-header {
-  padding: 4px 10px;
+  padding: 5px 12px;
   font-size: 12px;
   cursor: pointer;
   border: 1px solid #c0c0c0;
   border-bottom: none;
-  background: #e8e8e8;
-  color: #555;
-  cursor: default;
   border-radius: 3px 3px 0 0;
+  background: linear-gradient(#f8f8f8, #e0e0e0);
+  color: #333;
+  margin-right: 2px;
+}
+
+.wf-tab-header:hover {
+  background: linear-gradient(#ffffff, #e8e8e8);
 }
 
 .wf-tab-header.active {
@@ -1501,6 +1505,7 @@ body {
   border-color: #7a7a7a;
   border-bottom: 1px solid #fff;
   margin-bottom: -1px;
+  font-weight: 500;
 }
 
 .wf-tab-content {
