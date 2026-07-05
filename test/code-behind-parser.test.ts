@@ -42,6 +42,23 @@ public partial class N : Form {
     expect(btn?.calledSymbols).toContain("SaveOrder");
   });
 
+  it("captures generic method calls in calledSymbols", () => {
+    const src = `using System; using System.Windows.Forms;
+public partial class C : Form {
+    private void btn_Click(object sender, EventArgs e) {
+        var svc = GetService<IOrderService>();
+        Repository.Query<Customer>().Run();
+        Plain();
+    }
+}`;
+    const info = parseCodeBehind(src, "/proj/C.cs");
+    const btn = info.handlers.find((h) => h.handler === "btn_Click");
+    // Generic calls (Foo<T>()) must be captured, not dropped at the `<`.
+    expect(btn?.calledSymbols).toContain("GetService");
+    expect(btn?.calledSymbols).toContain("Repository.Query");
+    expect(btn?.calledSymbols).toContain("Plain");
+  });
+
   it("extracts event handlers with line ranges and called symbols", () => {
     const info = parseCodeBehind(CODE_BEHIND, "/proj/OrderForm.cs");
     const byName = Object.fromEntries(info.handlers.map((h) => [h.handler, h]));

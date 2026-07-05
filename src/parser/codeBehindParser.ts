@@ -40,8 +40,8 @@ const IDENT = "[A-Za-z_\\u0080-\\uFFFF][\\w\\u0080-\\uFFFF]*";
 // Allow C# 8+ nullable annotations (`object? sender`, `EventArgs? e`).
 const HANDLER_RE = new RegExp(
   `(?:private|protected|public|internal)?\\s*(?:async\\s+)?(?:void|Task)\\s+(${IDENT})\\s*\\(\\s*object\\??\\s+\\w+\\s*,\\s*[A-Za-z_][\\w.]*(?:EventArgs|Args)\\??\\b[^)]*\\)`, "g");
-// Method invocation inside a body: `Foo(` or `a.b.Foo(`.
-const CALL_RE = /(?<![.\w])([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*\(/g;
+// Method invocation inside a body: `Foo(`, `a.b.Foo(`, or generic `Foo<T>(`.
+const CALL_RE = /(?<![.\w])([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*(?:<[^<>()]*>)?\s*\(/g;
 // Navigation: `new SomeForm(...).Show()` / `.ShowDialog()` or `x.Show(`/`x.ShowDialog(`.
 const NEW_SHOW_RE = /new\s+([A-Z]\w*)\s*\([^;]*?\)\s*\.\s*(Show|ShowDialog)\s*\(/g;
 const VAR_SHOW_RE = /([A-Za-z_]\w*)\s*\.\s*(Show|ShowDialog)\s*\(/g;
