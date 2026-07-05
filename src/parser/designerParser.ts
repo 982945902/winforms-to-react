@@ -699,6 +699,13 @@ function assignControlProperty(control: MutableControl, property: string, value:
     case "Checked":
       if (typeof value === "boolean") control.appearance.checked = value;
       break;
+    case "CheckState": {
+      // Tri-state: Checked/Indeterminate render as checked; Unchecked as not.
+      const state = String(value ?? "");
+      if (state === "Checked" || state === "Indeterminate") control.appearance.checked = true;
+      else if (state === "Unchecked") control.appearance.checked = false;
+      break;
+    }
     case "ThreeState":
       if (typeof value === "boolean") control.appearance.threeState = value;
       break;

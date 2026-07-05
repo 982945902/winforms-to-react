@@ -954,4 +954,27 @@ describe("parseDesignerSource DataGridView nested style properties", () => {
     expect(dtp?.appearance?.format).toBe("Custom");
     expect(dtp?.appearance?.customFormat).toBe("yyyy-MM-dd");
   });
+
+  it("maps CheckBox CheckState (Checked/Indeterminate/Unchecked) to checked", () => {
+    const source = `namespace App { partial class C {
+  private void InitializeComponent() {
+    this.chk1 = new System.Windows.Forms.CheckBox();
+    this.chk2 = new System.Windows.Forms.CheckBox();
+    this.chk3 = new System.Windows.Forms.CheckBox();
+    this.chk1.CheckState = System.Windows.Forms.CheckState.Checked;
+    this.chk2.CheckState = System.Windows.Forms.CheckState.Indeterminate;
+    this.chk3.CheckState = System.Windows.Forms.CheckState.Unchecked;
+    this.Controls.Add(this.chk1);
+    this.Controls.Add(this.chk2);
+    this.Controls.Add(this.chk3);
+  }
+  private System.Windows.Forms.CheckBox chk1;
+  private System.Windows.Forms.CheckBox chk2;
+  private System.Windows.Forms.CheckBox chk3;
+}}`;
+    const result = parseDesignerSource(source, { sourcePath: "C.Designer.cs" });
+    expect(result.controlsByName.get("chk1")?.appearance?.checked).toBe(true);
+    expect(result.controlsByName.get("chk2")?.appearance?.checked).toBe(true);
+    expect(result.controlsByName.get("chk3")?.appearance?.checked).toBe(false);
+  });
 });
