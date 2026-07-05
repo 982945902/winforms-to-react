@@ -977,4 +977,37 @@ describe("parseDesignerSource DataGridView nested style properties", () => {
     expect(result.controlsByName.get("chk2")?.appearance?.checked).toBe(true);
     expect(result.controlsByName.get("chk3")?.appearance?.checked).toBe(false);
   });
+
+  it("parses lesser-used control kinds and their events (breadth check)", () => {
+    const source = `namespace App { partial class B {
+  private void InitializeComponent() {
+    this.hsb = new System.Windows.Forms.HScrollBar();
+    this.lnk = new System.Windows.Forms.LinkLabel();
+    this.rtb = new System.Windows.Forms.RichTextBox();
+    this.mcal = new System.Windows.Forms.MonthCalendar();
+    this.pg = new System.Windows.Forms.PropertyGrid();
+    this.rb = new System.Windows.Forms.RadioButton();
+    this.lnk.LinkClicked += new System.Windows.Forms.LinkLabelLinkClickedEventHandler(this.lnk_Clicked);
+    this.rb.CheckedChanged += new System.EventHandler(this.rb_Changed);
+    this.Controls.Add(this.hsb);
+    this.Controls.Add(this.lnk);
+    this.Controls.Add(this.rtb);
+    this.Controls.Add(this.mcal);
+    this.Controls.Add(this.pg);
+    this.Controls.Add(this.rb);
+  }
+  private System.Windows.Forms.HScrollBar hsb;
+  private System.Windows.Forms.LinkLabel lnk;
+  private System.Windows.Forms.RichTextBox rtb;
+  private System.Windows.Forms.MonthCalendar mcal;
+  private System.Windows.Forms.PropertyGrid pg;
+  private System.Windows.Forms.RadioButton rb;
+}}`;
+    const result = parseDesignerSource(source, { sourcePath: "B.Designer.cs" });
+    const kinds = [...result.controlsByName.values()].map((c) => c.kind).sort();
+    expect(kinds).toEqual(["HScrollBar", "LinkLabel", "MonthCalendar", "PropertyGrid", "RadioButton", "RichTextBox"]);
+    // Events on these kinds (incl. LinkLabel's specialized delegate) must be covered.
+    const events = result.report.eventStubs.map((e) => `${e.controlName}.${e.event}`).sort();
+    expect(events).toEqual(["lnk.LinkClicked", "rb.CheckedChanged"]);
+  });
 });
