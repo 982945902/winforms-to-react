@@ -1010,4 +1010,21 @@ describe("parseDesignerSource DataGridView nested style properties", () => {
     const events = result.report.eventStubs.map((e) => `${e.controlName}.${e.event}`).sort();
     expect(events).toEqual(["lnk.LinkClicked", "rb.CheckedChanged"]);
   });
+
+  it("surfaces form MaximizeBox/MinimizeBox/ControlBox to form fields", () => {
+    const source = `namespace App { partial class M {
+  private void InitializeComponent() {
+    this.MaximizeBox = false;
+    this.MinimizeBox = false;
+    this.ControlBox = false;
+    this.ClientSize = new System.Drawing.Size(200, 120);
+    this.Text = "M";
+  }
+}}`;
+    const result = parseDesignerSource(source, { sourcePath: "M.Designer.cs" });
+    // These drive the rendered title-bar buttons; must reach form fields, not just properties.
+    expect(result.form.maximizeBox).toBe(false);
+    expect(result.form.minimizeBox).toBe(false);
+    expect(result.form.controlBox).toBe(false);
+  });
 });

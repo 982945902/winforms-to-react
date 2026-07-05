@@ -870,6 +870,15 @@ function assignFormProperty(form: VisualForm, property: string, value: unknown) 
     case "BackgroundImage":
       form.backgroundImage = String(value ?? "");
       break;
+    case "MaximizeBox":
+      if (typeof value === "boolean") form.maximizeBox = value;
+      break;
+    case "MinimizeBox":
+      if (typeof value === "boolean") form.minimizeBox = value;
+      break;
+    case "ControlBox":
+      if (typeof value === "boolean") form.controlBox = value;
+      break;
     default:
       form.properties[property] = value;
       break;

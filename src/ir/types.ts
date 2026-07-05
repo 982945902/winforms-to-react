@@ -250,6 +250,9 @@ export type VisualForm = {
   cancelButton?: string;
   icon?: string;
   backgroundImage?: string;
+  maximizeBox?: boolean;
+  minimizeBox?: boolean;
+  controlBox?: boolean;
   controls: VisualControl[];
   properties: Record<string, unknown>;
   events?: VisualEvent[];
