@@ -78,4 +78,20 @@ describe("resxParser", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("decodes XML entities in resx values", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wf2react-resx-ent-"));
+    try {
+      const file = join(dir, "F.resx");
+      await writeFile(file, `<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <data name="lbl.Text" xml:space="preserve"><value>Save &amp; Close &lt;F5&gt; &quot;x&quot;</value></data>
+</root>`, "utf8");
+      const data = await parseResx(file);
+      // & < > " must round-trip decoded; &amp; must not double-decode.
+      expect(data.get("lbl")?.get("Text")).toBe('Save & Close <F5> "x"');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

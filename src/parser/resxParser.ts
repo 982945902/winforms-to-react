@@ -6,6 +6,19 @@ export type ResxControlProps = Map<string, string>;
 // Map from control name -> properties
 export type ResxData = Map<string, ResxControlProps>;
 
+// Decode the XML entities that resx <value> text is stored with, so displayed
+// text (labels/tooltips containing & < > " ') round-trips correctly.
+function decodeXmlEntities(s: string): string {
+  return s
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&amp;/g, "&"); // must be last so decoded entities aren't re-decoded
+}
+
 // Parse a .resx file and extract per-control properties.
 // resx entries look like:
 //   <data name="btnContinue.Location" type="System.Drawing.Point, System.Drawing">
@@ -21,7 +34,7 @@ export async function parseResx(filePath: string): Promise<ResxData> {
   const pattern = /<data\s+name="([^"&][^"]*)"(?:[^>]*)>\s*<value(?:[^>]*)>([^<]*)<\/value>\s*<\/data>/g;
   for (const match of source.matchAll(pattern)) {
     const fullName = match[1];
-    const value = match[2].trim();
+    const value = decodeXmlEntities(match[2].trim());
     const dotIdx = fullName.indexOf(".");
     if (dotIdx <= 0) continue;
     const controlName = fullName.slice(0, dotIdx);
