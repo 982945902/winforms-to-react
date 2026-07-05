@@ -865,4 +865,20 @@ describe("parseDesignerSource DataGridView nested style properties", () => {
     expect(tlp?.tableLayout?.cells).toEqual({ lblHeader: [0, 0], txtA: [0, 1], btnWide: [0, 2] });
     expect(tlp?.tableLayout?.columnSpan).toEqual({ lblHeader: 2, btnWide: 2 });
   });
+
+  it("does not truncate property values at a semicolon inside a string literal", () => {
+    const source = `namespace App { partial class S {
+  private void InitializeComponent() {
+    this.lbl = new System.Windows.Forms.Label();
+    this.lbl.Text = "First; Second; Third";
+    this.lbl.Location = new System.Drawing.Point(10, 10);
+    this.Controls.Add(this.lbl);
+  }
+  private System.Windows.Forms.Label lbl;
+}}`;
+    const result = parseDesignerSource(source, { sourcePath: "S.Designer.cs" });
+    const lbl = result.controlsByName.get("lbl");
+    // The full text (with embedded semicolons) must be captured, not "First.
+    expect(lbl?.text).toBe("First; Second; Third");
+  });
 });

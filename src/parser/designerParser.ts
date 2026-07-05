@@ -27,6 +27,10 @@ import { applyResxToProps } from "./resxParser.js";
 // `button_保存`. JS `\w` is ASCII-only, so add the non-ASCII range explicitly.
 // Used for control/handler NAMES (member types stay ASCII — WinForms types are English).
 const ID = "[A-Za-z_\\u0080-\\uFFFF][\\w\\u0080-\\uFFFF]*";
+// Property RHS value up to the terminating `;`, but a `;` INSIDE a double-quoted
+// string (e.g. `Text = "a; b"` or a file-filter `"Docs|*.doc;*.txt"`) must not
+// terminate. Consume whole "..." literals (with escapes) or any non-`;` char.
+const VALUE = "(?:\"(?:[^\"\\\\]|\\\\.)*\"|[^;])+";
 
 
 export type ParseDesignerOptions = {
@@ -557,7 +561,7 @@ function applyPropertyAssignments(
   columns: Map<string, MutableColumn>,
   form: VisualForm
 ) {
-  const controlPropertyPattern = new RegExp(`(?:this\\.)?(${ID})\\.([A-Za-z_]\\w*)\\s*=\\s*([^;]+);`, "g");
+  const controlPropertyPattern = new RegExp(`(?:this\\.)?(${ID})\\.([A-Za-z_]\\w*)\\s*=\\s*(${VALUE});`, "g");
   const consumedRanges: Array<[number, number]> = [];
 
   for (const match of source.matchAll(controlPropertyPattern)) {
@@ -581,7 +585,7 @@ function applyPropertyAssignments(
     }
   }
 
-  const formPropertyPattern = new RegExp(`(?:this\\.)?(${ID})\\s*=\\s*([^;]+);`, "g");
+  const formPropertyPattern = new RegExp(`(?:this\\.)?(${ID})\\s*=\\s*(${VALUE});`, "g");
   for (const match of source.matchAll(formPropertyPattern)) {
     if (consumedRanges.some(([start, end]) => match.index >= start && match.index < end)) continue;
 
