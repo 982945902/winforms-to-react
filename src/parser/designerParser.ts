@@ -1534,6 +1534,20 @@ function parseColor(value: unknown): VisualColor | undefined {
     return { cssColor: `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})` };
   }
 
+  // VS Designer emits FromArgb with nested casts:
+  //   Color.FromArgb(((int)(((byte)(64)))), ((int)(((byte)(128)))), ((int)(((byte)(255)))))
+  // Extract the numeric args in order (3 = RGB, 4 = ARGB).
+  const argbCast = raw.match(/(?:System\.Drawing\.)?Color\.FromArgb\s*\(([\s\S]*)\)/);
+  if (argbCast) {
+    const nums = argbCast[1].match(/\(byte\)\s*\(\s*(\d+)\s*\)/g)?.map((s) => Number(s.match(/(\d+)/)![1]));
+    if (nums && (nums.length === 3 || nums.length === 4)) {
+      const [x, y, z, w] = nums;
+      if (nums.length === 3) return { cssColor: `rgb(${x}, ${y}, ${z})` };
+      // 4 args = A, R, G, B
+      return { cssColor: `rgba(${y}, ${z}, ${w}, ${(x / 255).toFixed(3)})` };
+    }
+  }
+
   const known = raw.match(/(?:System\.Drawing\.)?Color\.FromKnownColor\s*\(\s*(?:System\.Drawing\.)?KnownColor\.([A-Za-z_]\w*)\s*\)/);
   if (known) {
     const name = known[1];

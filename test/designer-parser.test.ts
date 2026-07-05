@@ -881,4 +881,21 @@ describe("parseDesignerSource DataGridView nested style properties", () => {
     // The full text (with embedded semicolons) must be captured, not "First.
     expect(lbl?.text).toBe("First; Second; Third");
   });
+
+  it("parses Color.FromArgb with the nested-cast form VS Designer emits", () => {
+    const source = `namespace App { partial class C {
+  private void InitializeComponent() {
+    this.lbl = new System.Windows.Forms.Label();
+    this.lbl.ForeColor = System.Drawing.Color.FromArgb(((int)(((byte)(64)))), ((int)(((byte)(128)))), ((int)(((byte)(255)))));
+    this.lbl.BackColor = System.Drawing.Color.FromArgb(((int)(((byte)(200)))), ((int)(((byte)(10)))), ((int)(((byte)(20)))), ((int)(((byte)(30)))));
+    this.Controls.Add(this.lbl);
+  }
+  private System.Windows.Forms.Label lbl;
+}}`;
+    const result = parseDesignerSource(source, { sourcePath: "C.Designer.cs" });
+    const lbl = result.controlsByName.get("lbl");
+    expect(lbl?.appearance?.foreColor).toEqual({ cssColor: "rgb(64, 128, 255)" });
+    // 4-arg form is A,R,G,B → rgba(r,g,b, a/255).
+    expect(lbl?.appearance?.backColor).toEqual({ cssColor: "rgba(10, 20, 30, 0.784)" });
+  });
 });
