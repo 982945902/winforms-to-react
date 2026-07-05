@@ -938,4 +938,20 @@ describe("parseDesignerSource DataGridView nested style properties", () => {
     // scale byte (65536 >> 16 = 1) → 5 / 10^1 = 0.5
     expect(num?.appearance?.increment).toBe(0.5);
   });
+
+  it("captures DateTimePicker Format and CustomFormat", () => {
+    const source = `namespace App { partial class D {
+  private void InitializeComponent() {
+    this.dtp = new System.Windows.Forms.DateTimePicker();
+    this.dtp.Format = System.Windows.Forms.DateTimePickerFormat.Custom;
+    this.dtp.CustomFormat = "yyyy-MM-dd";
+    this.Controls.Add(this.dtp);
+  }
+  private System.Windows.Forms.DateTimePicker dtp;
+}}`;
+    const result = parseDesignerSource(source, { sourcePath: "D.Designer.cs" });
+    const dtp = result.controlsByName.get("dtp");
+    expect(dtp?.appearance?.format).toBe("Custom");
+    expect(dtp?.appearance?.customFormat).toBe("yyyy-MM-dd");
+  });
 });

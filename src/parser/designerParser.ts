@@ -744,6 +744,9 @@ function assignControlProperty(control: MutableControl, property: string, value:
     case "Format":
       control.appearance.format = String(value ?? "");
       break;
+    case "CustomFormat":
+      control.appearance.customFormat = String(value ?? "");
+      break;
     case "WordWrap":
       if (typeof value === "boolean") control.appearance.wordWrap = value;
       break;

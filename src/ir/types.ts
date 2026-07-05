@@ -135,6 +135,7 @@ export type VisualAppearance = {
   maximum?: number;
   increment?: number;
   format?: string;
+  customFormat?: string;
   wordWrap?: boolean;
   scrollBars?: string;
   checkedBoxes?: boolean;

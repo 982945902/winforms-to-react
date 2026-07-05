@@ -399,6 +399,7 @@ export type VisualAppearance = {
   maximum?: number;
   increment?: number;
   format?: string;
+  customFormat?: string;
   wordWrap?: boolean;
   scrollBars?: string;
   checkedBoxes?: boolean;
@@ -753,7 +754,12 @@ function WinControl({ control, hostStyle }: { control: VisualControl; hostStyle?
     }
     case "DateTimePicker": {
       const a = control.appearance ?? {};
-      const inputType = a.format === "Time" ? "time" : a.format === "Short" ? "date" : "datetime-local";
+      const custom = a.format === "Custom" ? (a.customFormat ?? "") : "";
+      const customHasTime = /[Hhms]/.test(custom);
+      const customDateOnly = custom !== "" && !customHasTime;
+      const inputType = a.format === "Time" ? "time"
+        : a.format === "Short" || customDateOnly ? "date"
+        : "datetime-local";
       return <input className="wf-input wf-date-picker" style={style} type={inputType} value={localValue ?? ""} onChange={(e) => setLocalValue(e.target.value)} aria-label={control.name} />;
     }
     case "MonthCalendar":
