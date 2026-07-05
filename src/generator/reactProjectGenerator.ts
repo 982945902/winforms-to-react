@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { MigrationReport, VisualForm } from "../ir/types.js";
+import type { BindingInfo, MigrationReport, VisualControl, VisualForm } from "../ir/types.js";
 
 export type GenerateReactProjectInput = {
   outDir: string;
@@ -20,6 +20,7 @@ export async function generateReactProject(input: GenerateReactProjectInput): Pr
   }
 
   await writeJson(join(input.outDir, "migration-report.json"), input.report);
+  await writeFile(join(input.outDir, "MIGRATION.md"), migrationMd(input.forms), "utf8");
   await writeFile(join(input.outDir, "package.json"), packageJson(), "utf8");
   await writeFile(join(input.outDir, "index.html"), indexHtml(), "utf8");
   await writeFile(join(input.outDir, "tsconfig.json"), tsconfigJson(), "utf8");
@@ -33,6 +34,83 @@ export async function generateReactProject(input: GenerateReactProjectInput): Pr
 
 async function writeJson(path: string, value: unknown) {
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+function migrationMd(forms: VisualForm[]): string {
+  const lines: string[] = [];
+  lines.push("# Migration Checklist");
+  lines.push("");
+  lines.push(
+    "前端骨架已生成。以下是需要人工对照 C# code-behind 补实现的契约点。每项标注了源文件位置和调用的符号。",
+  );
+  lines.push("");
+
+  for (const form of forms) {
+    lines.push(`## ${form.name} (${form.sourcePath})`);
+    lines.push("");
+
+    const contractPoints = form.support?.contractPoints ?? [];
+    lines.push("### 事件处理器 (event handlers)");
+    if (contractPoints.length === 0) {
+      lines.push("- _无_");
+    } else {
+      for (const cp of contractPoints) {
+        const calls = cp.calledSymbols.length ? ` — calls: ${cp.calledSymbols.join(", ")}` : "";
+        const location = cp.lineStart > 0
+          ? ` (${cp.sourceFile}:${cp.lineStart}-${cp.lineEnd})`
+          : ` — ${cp.sourceFile}`;
+        lines.push(`- [ ] ${cp.controlName}.${cp.event} → ${cp.handler}${location}${calls}`);
+      }
+    }
+    lines.push("");
+
+    const bindings = form.bindings ?? [];
+    const designerBindings = collectDesignerBindings(form.controls);
+    const seenBind = new Set<string>();
+    const allBindings = [...bindings, ...designerBindings].filter((b) => {
+      const k = `${b.controlName}|${b.boundProperty ?? ""}`;
+      if (seenBind.has(k)) return false;
+      seenBind.add(k);
+      return true;
+    });
+    lines.push("### 数据绑定 (data bindings)");
+    if (allBindings.length === 0) {
+      lines.push("- _无_");
+    } else {
+      for (const b of allBindings) {
+        const prop = b.boundProperty ? `.${b.boundProperty}` : "";
+        lines.push(`- [ ] ${b.controlName}${prop} ← ${b.dataSource} (${b.kind})`);
+      }
+    }
+    lines.push("");
+
+    const navigations = form.navigations ?? [];
+    lines.push("### 导航 (navigation)");
+    if (navigations.length === 0) {
+      lines.push("- _无_");
+    } else {
+      for (const nav of navigations) {
+        const from = nav.fromHandler ? ` (from ${nav.fromHandler})` : "";
+        lines.push(`- [ ] ${nav.modal ? "ShowDialog" : "Show"} → ${nav.target}${from}`);
+      }
+    }
+    lines.push("");
+  }
+
+  return lines.join("\n");
+}
+
+function collectDesignerBindings(controls: VisualControl[]): BindingInfo[] {
+  const out: BindingInfo[] = [];
+  const visit = (control: VisualControl): void => {
+    const ds = control.properties?.["DataSource"];
+    if (ds != null) {
+      out.push({ controlName: control.name, dataSource: String(ds), kind: "DataSource (designer)" });
+    }
+    for (const child of control.children ?? []) visit(child);
+  };
+  for (const c of controls) visit(c);
+  return out;
 }
 
 function packageJson() {
@@ -131,17 +209,20 @@ type GeneratedFormFile = {
 };
 
 function allocateFormFiles(forms: VisualForm[]): GeneratedFormFile[] {
-  const counts = new Map<string, number>();
-  for (const form of forms) {
-    counts.set(form.name, (counts.get(form.name) ?? 0) + 1);
-  }
-
+  // Ensure filenames are unique CASE-INSENSITIVELY: WinForms class names can differ
+  // only in casing (e.g. FormEditor vs formEditor), which collide on case-insensitive
+  // filesystems (macOS/Windows) and break `tsc` (TS1149). Track used lowercase names.
+  const used = new Set<string>();
   return forms.map((form, index) => {
-    const duplicate = (counts.get(form.name) ?? 0) > 1;
     const baseName = safeFileName(form.name);
+    let candidate = baseName;
+    if (used.has(candidate.toLowerCase())) {
+      candidate = `${index + 1}-${baseName}`;
+    }
+    used.add(candidate.toLowerCase());
     return {
       form,
-      fileName: duplicate ? `${index + 1}-${baseName}.json` : `${baseName}.json`,
+      fileName: `${candidate}.json`,
       importName: `form${index}`
     };
   });
@@ -310,9 +391,12 @@ export type VisualAppearance = {
   value?: string | number;
   minimum?: number;
   maximum?: number;
+  increment?: number;
   format?: string;
   wordWrap?: boolean;
   scrollBars?: string;
+  checkedBoxes?: boolean;
+  style?: string;
   view?: string;
   mask?: string;
   imageLocation?: string;
@@ -339,12 +423,36 @@ export type VisualTableLayout = {
   rowSpan?: Record<string, number>;
 };
 
+function escapeJsx(value: string): string {
+  return value.replace(/[&<>"']/g, (ch) => {
+    switch (ch) {
+      case "&": return "&amp;";
+      case "<": return "&lt;";
+      case ">": return "&gt;";
+      case '"': return "&quot;";
+      default: return "&#39;";
+    }
+  });
+}
+
 function imagePlaceholder(control: VisualControl): string {
   const img = control.appearance && (control.appearance.image || control.appearance.imageKey);
   if (!img) return "";
   const label = String(img).slice(0, 6);
   return '<span className="wf-img-placeholder" title="Image: ' + escapeJsx(String(img)) + '">' + escapeJsx(label) + '</span>';
 }
+
+export type MigrationHint = {
+  handler: string;
+  sourceFile: string;
+  lineStart: number;
+  lineEnd: number;
+  calledSymbols: string[];
+};
+
+export type ContractPoint = MigrationHint & { controlName: string; event: string };
+
+export type NavEdge = { target: string; modal: boolean; fromHandler?: string };
 
 export type VisualControl = {
   kind: string;
@@ -357,7 +465,7 @@ export type VisualControl = {
   autoSize?: boolean;
   appearance?: VisualAppearance;
   properties?: Record<string, unknown>;
-  events?: Array<{ event: string; handler: string }>;
+  events?: Array<{ event: string; handler: string; migrationHint?: MigrationHint }>;
   columns?: Array<{ name: string; headerText?: string; width?: number; kind: string }>;
   tableLayout?: VisualTableLayout;
   flowDirection?: string;
@@ -373,6 +481,10 @@ export type VisualControl = {
   splitterDistance?: number;
   items?: string[];
   children?: VisualControl[];
+  customProperties?: Array<{ name: string; type: string }>;
+  treeNodeChildren?: Record<string, string[]>;
+  treeRootNodes?: string[];
+  treeNodeTexts?: Record<string, string>;
 };
 
 export type VisualForm = {
@@ -388,7 +500,12 @@ export type VisualForm = {
   cancelButton?: string;
   icon?: string;
   backgroundImage?: string;
+  maximizeBox?: boolean;
+  minimizeBox?: boolean;
+  controlBox?: boolean;
   controls: VisualControl[];
+  support?: { contractPoints?: ContractPoint[] };
+  navigations?: NavEdge[];
 };
 
 export function WinFormHost({ form }: { form: VisualForm }) {
@@ -448,6 +565,26 @@ export function WinFormHost({ form }: { form: VisualForm }) {
         <div className="wf-event-log" title="Event log">
           {eventLog.map((e, i) => <div key={i}>{e}</div>)}
         </div>
+      )}
+      {((form.support?.contractPoints?.length ?? 0) > 0 || (form.navigations?.length ?? 0) > 0) && (
+        <aside className="wf-pending-panel">
+          <div className="wf-pending-title">待接后端 (pending backend)</div>
+          {form.support?.contractPoints?.map((cp, i) => (
+            <div key={"cp" + i} className="wf-pending-item">
+              <span className="wf-pending-ctrl">{cp.controlName}.{cp.event}</span>
+              <span className="wf-pending-loc">{cp.handler} → {cp.sourceFile}:{cp.lineStart}-{cp.lineEnd}</span>
+              {cp.calledSymbols.length > 0 && (
+                <span className="wf-pending-calls">calls: {cp.calledSymbols.join(", ")}</span>
+              )}
+            </div>
+          ))}
+          {form.navigations?.map((nav, i) => (
+            <div key={"nav" + i} className="wf-pending-item wf-pending-nav">
+              <span className="wf-pending-ctrl">{nav.modal ? "ShowDialog" : "Show"} → {nav.target}</span>
+              {nav.fromHandler && <span className="wf-pending-loc">from {nav.fromHandler}</span>}
+            </div>
+          ))}
+        </aside>
       )}
     </article>
   );
@@ -526,7 +663,10 @@ function dockLayout(parent: { width: number; height: number }, children: VisualC
     }
   });
   for (const index of fillIndices) {
-    styles[index] = { position: "absolute", left: slot.x, top: slot.y, width: Math.max(0, slot.width), height: Math.max(0, slot.height) };
+    // A Dock=Fill control occupies the remaining slot but should sit BEHIND
+    // absolutely-positioned siblings (common pattern: a Fill nav/tree behind an
+    // overlapping content panel). Give it a low z-index so siblings stay visible.
+    styles[index] = { position: "absolute", left: slot.x, top: slot.y, width: Math.max(0, slot.width), height: Math.max(0, slot.height), zIndex: 0 };
   }
   return styles;
 }
@@ -550,9 +690,34 @@ function WinControl({ control, hostStyle }: { control: VisualControl; hostStyle?
   );
   const [localChecked, setLocalChecked] = useState(control.appearance?.checked ?? false);
   const [btnFlash, setBtnFlash] = useState(false);
-  const hidden = control.appearance?.visible === false;
+  const hidden = control.appearance?.visible === false || control.properties?.nonVisual === true;
   if (hidden) return null;
 
+  const contractEvent = control.events?.find((e) => e.migrationHint) ?? control.events?.[0];
+  const contractHint = contractEvent?.migrationHint;
+  const hasNumericPos = typeof style.left === "number" && typeof style.width === "number";
+  const markerStyle: CSSProperties = hasNumericPos
+    ? {
+        position: "absolute",
+        left: (style.left as number) + (style.width as number) - 12,
+        top: (style.top as number | undefined) ?? 0,
+        zIndex: 5,
+      }
+    : { position: "absolute", right: 2, top: 2, zIndex: 5 };
+  const contractTitle = contractHint
+    ? contractHint.handler + " → " + contractHint.sourceFile + (contractHint.lineStart > 0 ? ":" + contractHint.lineStart : "") + " (待接后端)"
+    : (contractEvent ? contractEvent.handler + " (待接后端)" : "");
+  const contractMarker = contractEvent ? (
+    <span
+      className="wf-contract-marker"
+      style={markerStyle}
+      title={contractTitle}
+    >
+      {"⊕"}
+    </span>
+  ) : null;
+
+  const inner = (() => {
   switch (control.kind) {
     case "Label":
       return <span className="wf-label" style={style}>{label}</span>;
@@ -627,7 +792,7 @@ function WinControl({ control, hostStyle }: { control: VisualControl; hostStyle?
     case "ToolStripSplitButton":
     case "ToolStripMenuItem":
       if (children.length > 0) {
-        return <WinDropdownMenuItem control={control} style={style} label={label} />;
+        return <WinDropdownMenuItem control={control} label={label} />;
       }
       return <button className="wf-strip-button" style={style} title={eventTitle(control)}>{label || control.name}</button>;
     case "ToolStripLabel":
@@ -680,6 +845,10 @@ function WinControl({ control, hostStyle }: { control: VisualControl; hostStyle?
     }
     case "ProgressBar": {
       const a = control.appearance ?? {};
+      const marquee = a.style === "Marquee";
+      if (marquee) {
+        return <div className="wf-progress" style={style}><div className="wf-progress-bar wf-progress-marquee" /></div>;
+      }
       const v = typeof a.value === "number" ? a.value : 0;
       const min = a.minimum ?? 0;
       const max = a.maximum ?? 100;
@@ -718,12 +887,16 @@ function WinControl({ control, hostStyle }: { control: VisualControl; hostStyle?
     default:
       return <div className="wf-unknown" style={style}><CustomControlTag control={control} /></div>;
   }
+  })();
+
+  if (!contractMarker) return inner;
+  return <>{inner}{contractMarker}</>;
 }
 
 // Smart placeholder for custom controls: shows type name + key properties
 function CustomControlTag({ control }: { control: VisualControl }) {
   const original = control.properties?.originalKind;
-  const kind = original || control.kind;
+  const kind = String(original || control.kind);
   const props = control.customProperties ?? [];
   const titleText = props.length ? props.map((p) => p.name + ": " + p.type).join(", ") : "Custom control";
   return (
@@ -786,6 +959,17 @@ function WinSplitContainer({ control, style, formSize }: { control: VisualContro
     : { width: splitPos, overflow: "auto", position: "relative", flexShrink: 0 };
   const panel2Style: CSSProperties = { flex: 1, overflow: "auto", position: "relative" };
 
+  const totalW = (style.width as number | undefined) ?? control.bounds?.width ?? size;
+  const totalH = (style.height as number | undefined) ?? control.bounds?.height ?? size;
+  const p1Size = horizontal ? { width: totalW, height: splitPos } : { width: splitPos, height: totalH };
+  const p2Size = horizontal
+    ? { width: totalW, height: Math.max(0, totalH - splitPos) }
+    : { width: Math.max(0, totalW - splitPos), height: totalH };
+  const panelChildStyle = (panelSize: { width: number; height: number }, c: VisualControl): CSSProperties =>
+    (c.dock ?? "None") === "Fill"
+      ? { position: "absolute", left: 0, top: 0, width: panelSize.width, height: panelSize.height }
+      : { position: "relative" };
+
   const onMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
     setDragging(true);
@@ -807,9 +991,9 @@ function WinSplitContainer({ control, style, formSize }: { control: VisualContro
 
   return (
     <div className="wf-split" style={splitStyle}>
-      <div className="wf-split-panel" style={panel1Style}>{p1.map((c) => <WinControl key={c.name} control={c} hostStyle={{position:"relative"}} />)}</div>
+      <div className="wf-split-panel" style={panel1Style}>{p1.map((c) => <WinControl key={c.name} control={c} hostStyle={panelChildStyle(p1Size, c)} />)}</div>
       <div className={"wf-splitter-bar" + (dragging ? " dragging" : "")} onMouseDown={onMouseDown} title="Drag to resize" />
-      <div className="wf-split-panel" style={panel2Style}>{p2.map((c) => <WinControl key={c.name} control={c} hostStyle={{position:"relative"}} />)}{rest.map((c) => <WinControl key={c.name} control={c} hostStyle={{position:"relative"}} />)}</div>
+      <div className="wf-split-panel" style={panel2Style}>{p2.map((c) => <WinControl key={c.name} control={c} hostStyle={panelChildStyle(p2Size, c)} />)}{rest.map((c) => <WinControl key={c.name} control={c} hostStyle={panelChildStyle(p2Size, c)} />)}</div>
     </div>
   );
 }
@@ -902,6 +1086,10 @@ function WinTabControl({ control, style }: { control: VisualControl; style: CSSP
   const tabs = children.filter((c) => c.kind === "TabPage" || c.kind === "UserControl");
   const [activeTab, setActiveTab] = useState(0);
   const tabStyle: CSSProperties = { ...style, display: "flex", flexDirection: "column", overflow: "hidden" };
+  // Size the active page's content so Dock=Fill / nested layout doesn't collapse.
+  // Fall back to the form-ish default when the TabControl has no explicit size.
+  const contentW = (style.width as number | undefined) ?? control.bounds?.width ?? 600;
+  const contentH = Math.max(0, ((style.height as number | undefined) ?? control.bounds?.height ?? 400) - 28);
   return (
     <div className="wf-tab" style={tabStyle}>
       <div className="wf-tab-strip">
@@ -909,8 +1097,8 @@ function WinTabControl({ control, style }: { control: VisualControl; style: CSSP
           <button key={tab.name} className={"wf-tab-header" + (i === activeTab ? " active" : "")} onClick={() => setActiveTab(i)}>{tab.text || tab.name}</button>
         ))}
       </div>
-      <div className="wf-tab-content" style={{ flex: 1, position: "relative", overflow: "auto" }}>
-        {tabs.length > 0 && activeTab < tabs.length ? <WinControl key={tabs[activeTab].name} control={tabs[activeTab]} hostStyle={{ position: "absolute", inset: 0 }} /> : null}
+      <div className="wf-tab-content" style={{ flex: 1, position: "relative", overflow: "auto", minHeight: contentH }}>
+        {tabs.length > 0 && activeTab < tabs.length ? <WinControl key={tabs[activeTab].name} control={tabs[activeTab]} hostStyle={{ position: "absolute", left: 0, top: 0, width: contentW, height: contentH }} /> : null}
       </div>
     </div>
   );
@@ -920,36 +1108,41 @@ function WinTabControl({ control, style }: { control: VisualControl; style: CSSP
 function WinTreeView({ control, items, style }: { control: VisualControl; items: string[]; style: CSSProperties }) {
   const treeNodeChildren = control.treeNodeChildren ?? {};
   const treeRootNodes = control.treeRootNodes;
-  
-  // If we have tree structure, render recursively; otherwise fallback to flat items
+  const checkBoxes = control.appearance?.checkedBoxes === true;
+
   if (treeRootNodes && treeRootNodes.length) {
     const nodeTexts = control.treeNodeTexts ?? {};
-    
+
     function renderNode(nodeName: string, depth: number): React.ReactNode {
       const text = nodeTexts[nodeName] || nodeName;
       const kids = treeNodeChildren[nodeName];
       return (
         <div key={nodeName} className="wf-tree-branch" style={{ marginLeft: depth * 16 }}>
           <div className="wf-tree-node">
-            {kids && kids.length > 0 && <span className="wf-tree-toggle">{"\u25BE"}</span>}
+            {checkBoxes && <input type="checkbox" className="wf-tree-check" />}
+            {kids && kids.length > 0 && <span className="wf-tree-toggle">{"▾"}</span>}
             <span>{text}</span>
           </div>
           {kids && kids.map((child) => renderNode(child, depth + 1))}
         </div>
       );
     }
-    
+
     return (
       <div className="wf-list wf-tree" style={style}>
         {treeRootNodes.map((root) => renderNode(root, 0))}
       </div>
     );
   }
-  
-  // Fallback to flat items
+
   return (
     <div className="wf-list wf-tree" style={style}>
-      {items.map((item) => <div key={item} className="wf-tree-node">{item}</div>)}
+      {items.map((item) => (
+        <div key={item} className="wf-tree-node">
+          {checkBoxes && <input type="checkbox" className="wf-tree-check" />}
+          <span>{item}</span>
+        </div>
+      ))}
     </div>
   );
 }
@@ -1032,16 +1225,25 @@ function WinWebBrowser({ control, style }: { control: VisualControl; style: CSSP
 function WinTableLayoutPanel({ control, style }: { control: VisualControl; style: CSSProperties }) {
   const tlp = control.tableLayout;
   const children = control.children ?? [];
-  if (!tlp || (tlp.columns.length === 0 && tlp.rows.length === 0)) {
+  if (!tlp || (tlp.columns.length === 0 && tlp.rows.length === 0 && Object.keys(tlp.cells).length === 0)) {
     return <div className="wf-panel wf-tlp" style={style}>{children.map((child) => <WinControl key={child.name} control={child} />)}</div>;
   }
 
+  // WinForms allows RowCount/ColumnCount without explicit per-row/column styles.
+  // When sizing arrays are empty, distribute evenly using the declared count,
+  // falling back to the max occupied cell index derived from child positions.
+  const cellList = Object.values(tlp.cells);
+  const maxCol = cellList.reduce((m, c) => Math.max(m, c[0]), 0) + 1;
+  const maxRow = cellList.reduce((m, c) => Math.max(m, c[1]), 0) + 1;
+  const colCount = Number(control.properties?.["ColumnCount"]) || maxCol;
+  const rowCount = Number(control.properties?.["RowCount"]) || maxRow;
+
   const colTemplate = tlp.columns.length
     ? tlp.columns.map((c) => sizingToGrid(c, "column")).join(" ")
-    : "auto";
+    : \`repeat(\${colCount}, 1fr)\`;
   const rowTemplate = tlp.rows.length
     ? tlp.rows.map((r) => sizingToGrid(r, "row")).join(" ")
-    : "auto";
+    : \`repeat(\${rowCount}, 1fr)\`;
   const gridStyle: CSSProperties = { ...style, display: "grid", gridTemplateColumns: colTemplate, gridTemplateRows: rowTemplate };
 
   return (
@@ -1084,11 +1286,17 @@ function WinDataGridView({ control, style }: { control: VisualControl; style: CS
   const selectionForeColor = (props["DefaultCellStyle.SelectionForeColor"] as VisualColor | undefined)?.cssColor;
 
   const [selectedRow, setSelectedRow] = useState(0);
+  const dataSource = props["DataSource"] != null ? String(props["DataSource"]) : undefined;
   const gridStyle: CSSProperties = { ...style, background: bgColor ?? "#ffffff", borderColor: gridColor };
   const headerStyle: CSSProperties = { background: headerBackColor, color: headerForeColor };
 
   return (
     <div className="wf-grid" style={gridStyle}>
+      {dataSource && (
+        <div className="wf-contract-marker wf-grid-binding" title={"DataSource: " + dataSource + " (待接后端)"}>
+          {"⊕ " + dataSource}
+        </div>
+      )}
       <table>
         <thead>
           <tr>{columns.map((column) => <th key={column.name} style={{ width: column.width, ...headerStyle }}>{column.headerText || column.name}</th>)}</tr>
@@ -1119,7 +1327,10 @@ function boundsStyle(control: VisualControl): CSSProperties {
     left: bounds.x,
     top: bounds.y,
     width: autoSize ? "auto" : bounds.width,
-    height: autoSize ? "auto" : bounds.height
+    height: autoSize ? "auto" : bounds.height,
+    // Sit above Dock=Fill siblings (which use zIndex:0) so absolute content
+    // overlapping a Fill panel/tree stays visible.
+    zIndex: 1
   };
 }
 
@@ -1454,12 +1665,79 @@ body {
   text-overflow: ellipsis;
 }
 
+.wf-contract-marker {
+  color: #d9822b;
+  font-weight: bold;
+  cursor: help;
+  font-size: 12px;
+}
+
+.wf-grid-binding {
+  display: inline-block;
+  padding: 1px 6px;
+  background: #fff4e5;
+  border: 1px solid #f0c48a;
+  border-radius: 3px;
+  font-size: 11px;
+  margin: 2px;
+}
+
+.wf-pending-panel {
+  border-top: 2px solid #f0c48a;
+  background: #fffaf3;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: #6b4a1f;
+}
+
+.wf-pending-title {
+  font-weight: bold;
+  color: #b5651d;
+  margin-bottom: 4px;
+}
+
+.wf-pending-item {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 2px 0;
+  border-bottom: 1px dotted #eadfc8;
+}
+
+.wf-pending-ctrl {
+  font-weight: 600;
+}
+
+.wf-pending-loc {
+  font-family: monospace;
+  color: #8a6d3b;
+}
+
+.wf-pending-calls {
+  color: #9c7a3c;
+  font-style: italic;
+}
+
+.wf-pending-nav .wf-pending-ctrl {
+  color: #2f6f9f;
+}
+
 .wf-check {
   display: flex;
   align-items: center;
   gap: 4px;
   font-size: 12px;
   overflow: hidden;
+  white-space: nowrap;
+}
+
+.wf-check input {
+  flex-shrink: 0;
+}
+
+.wf-check span {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .wf-group {
@@ -1880,6 +2158,18 @@ body {
   background: linear-gradient(#3a8de6, #1f6fc4);
 }
 
+.wf-progress-marquee {
+  width: 40%;
+  position: absolute;
+  left: 0;
+  animation: wf-marquee 1.5s linear infinite;
+}
+
+@keyframes wf-marquee {
+  from { left: -40%; }
+  to { left: 100%; }
+}
+
 .wf-unknown {
   border-style: dashed;
   color: #7a3300;
@@ -1938,6 +2228,11 @@ body {
 
 .wf-tree {
   padding: 4px;
+}
+
+.wf-tree-check {
+  margin-right: 4px;
+  vertical-align: middle;
 }
 
 .wf-tree-node {

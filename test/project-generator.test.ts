@@ -30,7 +30,8 @@ describe("generateReactProject", () => {
           unknownPercent: 0,
           byKind: [{ kind: "Button", count: 1, status: "supported" }]
         },
-        eventStubs: [{ controlName: "button1", event: "Click", handler: "button1_Click" }]
+        eventStubs: [{ controlName: "button1", event: "Click", handler: "button1_Click" }],
+        contractPoints: []
       },
       controls: [
         {
@@ -75,7 +76,8 @@ describe("generateReactProject", () => {
             unknownPercent: 0,
             byKind: [{ kind: "Button", count: 1, status: "supported" }]
           },
-          eventStubs: [{ controlName: "button1", event: "Click", handler: "button1_Click" }]
+          eventStubs: [{ controlName: "button1", event: "Click", handler: "button1_Click" }],
+        contractPoints: []
         }
       });
 
@@ -108,6 +110,84 @@ describe("generateReactProject", () => {
     }
   });
 
+  it("writes MIGRATION.md and renders contract markers for forms with contract points", async () => {
+    const outDir = await mkdtemp(join(tmpdir(), "wf2react-mig-"));
+    const hint = {
+      handler: "btnSave_Click",
+      sourceFile: "OrderForm.cs",
+      lineStart: 6,
+      lineEnd: 10,
+      calledSymbols: ["SaveOrder", "MessageBox.Show"]
+    };
+    const form: VisualForm = {
+      kind: "Form",
+      name: "OrderForm",
+      sourcePath: "src/OrderForm.Designer.cs",
+      text: "Order",
+      clientSize: { width: 200, height: 120 },
+      support: {
+        controlsConverted: 1,
+        supportedControls: ["Button"],
+        degradedControls: [],
+        unknownControls: [],
+        controlCoverage: {
+          total: 1, supported: 1, degraded: 0, unknown: 0,
+          supportedPercent: 100, previewablePercent: 100, unknownPercent: 0,
+          byKind: [{ kind: "Button", count: 1, status: "supported" }]
+        },
+        eventStubs: [{ controlName: "btnSave", event: "Click", handler: "btnSave_Click" }],
+        contractPoints: [{ ...hint, controlName: "btnSave", event: "Click" }]
+      },
+      controls: [
+        {
+          kind: "Button",
+          name: "btnSave",
+          text: "Save",
+          bounds: { x: 10, y: 10, width: 75, height: 23 },
+          properties: {},
+          events: [{ event: "Click", handler: "btnSave_Click", migrationHint: hint }],
+          children: []
+        }
+      ],
+      properties: {},
+      navigations: [{ target: "DetailForm", modal: true, fromHandler: "btnDetail_Click" }],
+      bindings: [{ controlName: "grid", dataSource: "orderBindingSource", kind: "BindingSource" }]
+    };
+
+    try {
+      await generateReactProject({
+        outDir,
+        forms: [form],
+        report: {
+          sourceFiles: ["OrderForm.Designer.cs"],
+          forms: [{ name: "OrderForm", title: "Order", sourcePath: "src/OrderForm.Designer.cs", support: form.support }],
+          formsConverted: 1,
+          controlsConverted: 1,
+          supportedControls: ["Button"],
+          degradedControls: [],
+          unknownControls: [],
+          controlCoverage: form.support.controlCoverage,
+          eventStubs: form.support.eventStubs
+        }
+      });
+
+      const migration = await readFile(join(outDir, "MIGRATION.md"), "utf8");
+      expect(migration).toContain("# Migration Checklist");
+      expect(migration).toContain("## OrderForm (src/OrderForm.Designer.cs)");
+      expect(migration).toContain("btnSave.Click → btnSave_Click (OrderForm.cs:6-10)");
+      expect(migration).toContain("calls: SaveOrder, MessageBox.Show");
+      expect(migration).toContain("ShowDialog → DetailForm");
+      expect(migration).toContain("grid ← orderBindingSource (BindingSource)");
+
+      const compat = await readFile(join(outDir, "src", "winformsCompat.tsx"), "utf8");
+      expect(compat).toContain("wf-contract-marker");
+      expect(compat).toContain("wf-pending-panel");
+      expect(compat).toContain("待接后端");
+    } finally {
+      await rm(outDir, { recursive: true, force: true });
+    }
+  });
+
   it("deduplicates generated files and imports for forms with the same class name", async () => {
     const outDir = await mkdtemp(join(tmpdir(), "wf2react-dupes-"));
     const form: VisualForm = {
@@ -131,7 +211,8 @@ describe("generateReactProject", () => {
           unknownPercent: 0,
           byKind: []
         },
-        eventStubs: []
+        eventStubs: [],
+        contractPoints: []
       },
       controls: [],
       properties: {}
@@ -172,12 +253,13 @@ describe("generateReactProject", () => {
             unknownPercent: 0,
             byKind: []
           },
-          eventStubs: []
+          eventStubs: [],
+        contractPoints: []
         }
       });
 
       const app = await readFile(join(outDir, "src", "App.tsx"), "utf8");
-      const first = JSON.parse(await readFile(join(outDir, "forms", "1-Form1.json"), "utf8"));
+      const first = JSON.parse(await readFile(join(outDir, "forms", "Form1.json"), "utf8"));
       const second = JSON.parse(await readFile(join(outDir, "forms", "2-Form1.json"), "utf8"));
 
       expect(app).toContain("form0");
@@ -186,6 +268,43 @@ describe("generateReactProject", () => {
       expect(app).toContain("id: \"form-1\"");
       expect(first.name).toBe("Form1");
       expect(second.name).toBe("Form1");
+    } finally {
+      await rm(outDir, { recursive: true, force: true });
+    }
+  });
+
+  it("gives case-only-different form names distinct filenames (avoids TS1149 on case-insensitive FS)", async () => {
+    const outDir = await mkdtemp(join(tmpdir(), "wf2react-case-"));
+    const mkForm = (name: string): VisualForm => ({
+      kind: "Form",
+      name,
+      sourcePath: `${name}.Designer.cs`,
+      support: {
+        controlsConverted: 0, supportedControls: [], degradedControls: [], unknownControls: [],
+        controlCoverage: { total: 0, supported: 0, degraded: 0, unknown: 0, supportedPercent: 0, previewablePercent: 0, unknownPercent: 0, byKind: [] },
+        eventStubs: [], contractPoints: []
+      },
+      controls: [],
+      properties: {}
+    });
+    const forms = [mkForm("FormEditor"), mkForm("formEditor")];
+    try {
+      await generateReactProject({
+        outDir,
+        forms,
+        report: {
+          sourceFiles: forms.map((f) => f.sourcePath),
+          forms: forms.map((f) => ({ name: f.name, title: f.name, sourcePath: f.sourcePath, support: f.support })),
+          formsConverted: 2, controlsConverted: 0,
+          supportedControls: [], degradedControls: [], unknownControls: [],
+          controlCoverage: forms[0].support.controlCoverage, eventStubs: []
+        }
+      });
+      const app = await readFile(join(outDir, "src", "App.tsx"), "utf8");
+      // The two imports must reference filenames that differ by MORE than casing.
+      const importedFiles = [...app.matchAll(/from "\.\.\/forms\/([^"]+)"/g)].map((m) => m[1]);
+      const lowered = importedFiles.map((f) => f.toLowerCase());
+      expect(new Set(lowered).size).toBe(importedFiles.length);
     } finally {
       await rm(outDir, { recursive: true, force: true });
     }
@@ -218,7 +337,8 @@ describe("generateReactProject", () => {
             { kind: "StatusStrip", count: 1, status: "supported" }
           ]
         },
-        eventStubs: []
+        eventStubs: [],
+        contractPoints: []
       },
       controls: [
         {
@@ -272,7 +392,8 @@ describe("generateReactProject", () => {
           degradedControls: [],
           unknownControls: [],
           controlCoverage: form.support.controlCoverage,
-          eventStubs: []
+          eventStubs: [],
+        contractPoints: []
         }
       });
 
@@ -332,7 +453,8 @@ describe("generateReactProject", () => {
             { kind: "FlowLayoutPanel", count: 1, status: "supported" }
           ]
         },
-        eventStubs: []
+        eventStubs: [],
+        contractPoints: []
       },
       controls: [
         {
@@ -371,7 +493,8 @@ describe("generateReactProject", () => {
           degradedControls: [],
           unknownControls: [],
           controlCoverage: form.support.controlCoverage,
-          eventStubs: []
+          eventStubs: [],
+        contractPoints: []
         }
       });
 

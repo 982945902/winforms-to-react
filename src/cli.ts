@@ -52,8 +52,11 @@ async function runConvert(options: CliOptions) {
   const outDir = resolve(options.outDir ?? "out/wf2react-preview");
   const result = await convertDesignerSources(input);
   if (options.formEngine === "tanstack") {
+    console.error(
+      "wf2react: [deprecated] --form tanstack 已冻结,不再维护。建议使用默认 React Custom 输出。",
+    );
     await generateTanStackFormProject({ outDir, forms: result.forms, report: result.report });
-    console.log(`Converted ${result.report.formsConverted} form(s) to TanStack Form`);
+    console.log(`Converted ${result.report.formsConverted} form(s) to TanStack Form (deprecated)`);
   } else {
     await generateReactProject({ outDir, forms: result.forms, report: result.report });
     console.log(`Converted ${result.report.formsConverted} form(s), ${result.report.controlsConverted} control(s)`);
@@ -109,7 +112,7 @@ Usage:
   wf2react convert <file-or-folder> --out <dir> [--form tanstack]
   wf2react report <file-or-folder> [--out <dir>]
 
-  --form tanstack  Generate TanStack Form + Zod instead of compatibility preview
+  --form tanstack  [已废弃] 生成 TanStack Form + Zod,而非默认 React 预览。冻结不再维护。
 `);
 }
 

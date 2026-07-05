@@ -2,6 +2,17 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { MigrationReport, VisualAppearance, VisualControl, VisualForm } from "../ir/types.js";
 
+/**
+ * @deprecated 冻结,不再开发。
+ *
+ * 迁移策略已改为 B 方案:React Custom 生成完整的视觉+结构骨架,
+ * 事件/数据/导航作为"待接后端"的占位标注,人工对照 code-behind 填实现。
+ * 前端是一等公民,充当后端迁移的契约骨架。
+ *
+ * TanStack Form 路径只覆盖输入型控件、校验是从控件几何猜出来的、
+ * 提交是 mock,与上述策略方向相悖。保留仅为存档,勿在此基础上继续开发。
+ */
+
 export type GenerateTanStackFormInput = {
   outDir: string;
   forms: VisualForm[];

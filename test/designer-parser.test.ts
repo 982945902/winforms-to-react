@@ -159,7 +159,8 @@ describe("parseDesignerSource", () => {
       degradedControls: [],
       unknownControls: [],
       controlCoverage: result.report.controlCoverage,
-      eventStubs: [{ controlName: "btnSave", event: "Click", handler: "btnSave_Click" }]
+      eventStubs: [{ controlName: "btnSave", event: "Click", handler: "btnSave_Click" }],
+      contractPoints: []
     });
     expect(result.report.forms).toEqual([
       {
@@ -836,5 +837,32 @@ describe("parseDesignerSource DataGridView nested style properties", () => {
     expect((grid?.properties["ColumnHeadersDefaultCellStyle.BackColor"] as { cssColor: string })?.cssColor).toBe("rgb(230, 230, 230)");
     expect((grid?.properties["AlternatingRowsDefaultCellStyle.BackColor"] as { cssColor: string })?.cssColor).toBe("rgb(245, 245, 245)");
     expect(grid?.columns).toEqual([{ name: "col1", headerText: "Name", width: 100, kind: "DataGridViewTextBoxColumn" }]);
+  });
+
+  it("captures TableLayoutPanel cell coordinates and SetColumnSpan/SetRowSpan", () => {
+    const source = `namespace App { partial class TlpForm {
+  private void InitializeComponent() {
+    this.tlp = new System.Windows.Forms.TableLayoutPanel();
+    this.lblHeader = new System.Windows.Forms.Label();
+    this.txtA = new System.Windows.Forms.TextBox();
+    this.btnWide = new System.Windows.Forms.Button();
+    this.tlp.ColumnCount = 2;
+    this.tlp.RowCount = 3;
+    this.tlp.Controls.Add(this.lblHeader, 0, 0);
+    this.tlp.SetColumnSpan(this.lblHeader, 2);
+    this.tlp.Controls.Add(this.txtA, 0, 1);
+    this.tlp.Controls.Add(this.btnWide, 0, 2);
+    this.tlp.SetColumnSpan(this.btnWide, 2);
+    this.Controls.Add(this.tlp);
+  }
+  private System.Windows.Forms.TableLayoutPanel tlp;
+  private System.Windows.Forms.Label lblHeader;
+  private System.Windows.Forms.TextBox txtA;
+  private System.Windows.Forms.Button btnWide;
+}}`;
+    const result = parseDesignerSource(source, { sourcePath: "TlpForm.Designer.cs" });
+    const tlp = result.controlsByName.get("tlp");
+    expect(tlp?.tableLayout?.cells).toEqual({ lblHeader: [0, 0], txtA: [0, 1], btnWide: [0, 2] });
+    expect(tlp?.tableLayout?.columnSpan).toEqual({ lblHeader: 2, btnWide: 2 });
   });
 });

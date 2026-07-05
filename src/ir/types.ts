@@ -10,9 +10,36 @@ export type VisualSize = {
   height: number;
 };
 
+export type MigrationHint = {
+  handler: string;
+  sourceFile: string;
+  lineStart: number;
+  lineEnd: number;
+  calledSymbols: string[];
+};
+
 export type VisualEvent = {
   event: string;
   handler: string;
+  migrationHint?: MigrationHint;
+};
+
+export type NavEdge = {
+  target: string;
+  modal: boolean;
+  fromHandler?: string;
+};
+
+export type BindingInfo = {
+  controlName: string;
+  dataSource: string;
+  boundProperty?: string;
+  kind: string;
+};
+
+export type ContractPoint = MigrationHint & {
+  controlName: string;
+  event: string;
 };
 
 export type VisualColumn = {
@@ -108,7 +135,8 @@ export type VisualAppearance = {
   format?: string;
   wordWrap?: boolean;
   scrollBars?: string;
-  // ListView/TabControl view mode (Details/List/SmallIcon/LargeIcon/Tile).
+  checkedBoxes?: boolean;
+  style?: string;
   view?: string;
   mask?: string;
   imageLocation?: string;
@@ -193,6 +221,7 @@ export type FormSupportSummary = {
   unknownControls: string[];
   controlCoverage: ControlCoverage;
   eventStubs: EventStub[];
+  contractPoints: ContractPoint[];
 };
 
 export type FormReportSummary = {
@@ -220,6 +249,9 @@ export type VisualForm = {
   backgroundImage?: string;
   controls: VisualControl[];
   properties: Record<string, unknown>;
+  events?: VisualEvent[];
+  navigations?: NavEdge[];
+  bindings?: BindingInfo[];
 };
 
 export type MigrationReport = {

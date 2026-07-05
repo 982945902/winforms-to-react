@@ -23,6 +23,12 @@ import type {
 import type { ResxData } from "./resxParser.js";
 import { applyResxToProps } from "./resxParser.js";
 
+// C# identifier fragment that also matches non-ASCII (CJK/accented) names, e.g.
+// `button_保存`. JS `\w` is ASCII-only, so add the non-ASCII range explicitly.
+// Used for control/handler NAMES (member types stay ASCII — WinForms types are English).
+const ID = "[A-Za-z_\\u0080-\\uFFFF][\\w\\u0080-\\uFFFF]*";
+
+
 export type ParseDesignerOptions = {
   sourcePath: string;
   baseKindMap?: Map<string, string>;
@@ -209,7 +215,7 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
   };
 
   applyPropertyAssignments(stripped, controls, columns, form);
-  applyEvents(stripped, controls);
+  applyEvents(stripped, controls, form, fields);
 
   // Apply resx column headers BEFORE applyColumns copies columns into grid.columns
   if (options.resxData) {
@@ -235,8 +241,6 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
 
 
   applyImplicitDock(controls, form);
-  console.error("[DBG] controls before resolution:", [...controls.values()].slice(0,5).map(c=>c.name+":"+c.kind).join(", "));
-  console.error("[DBG] baseKindMap size:", options.baseKindMap?.size);
 
   // Resolve custom control kinds to known WinForms base kinds using baseKindMap
   if (options.baseKindMap && options.baseKindMap.size > 0) {
@@ -260,6 +264,14 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
     }
   }
 
+  // Attach custom-control property metadata (from sibling .cs class definitions)
+  // so the renderer's CustomControlTag can show property chips.
+  if (options.controlProps && options.controlProps.size > 0) {
+    for (const control of controls.values()) {
+      tagCustomProps(control, options.baseKindMap, options.controlProps);
+    }
+  }
+
   // Inline UserControl definitions: replace UserControl instances with their
   // parsed child controls, translating coordinates to the parent's space.
   if (options.userControlDefs) {
@@ -267,9 +279,8 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
   }
 
   function inlineUserControls(controls: Map<string, MutableControl>, form: VisualForm, defs: Map<string, VisualControl[]>) {
-    console.error("[UC] inlineUserControls: defs keys:", [...defs.keys()].slice(0,10));
     for (const [name, control] of controls) {
-      if (control.kind !== "UserControl") { console.error("[UC] skip", name, "kind=",control.kind); continue; }
+      if (control.kind !== "UserControl") { continue; }
       const children = defs.get(control.properties.originalKind as string ?? "") ?? defs.get(control.name);
       if (children && children.length > 0) {
         // UserControl instance location + child location = absolute position in parent
@@ -287,11 +298,29 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
         for (const child of inlinedChildren) {
           controls.set(child.name, child as MutableControl);
         }
+        // If the UserControl instance had its own event handlers wired on the host
+        // form (e.g. eiTheme.ExportRequested += ...), those are contract points that
+        // must not be lost when the control is inlined away. Retain a nonVisual
+        // stub carrying just the events so coverage stays 100%.
+        const retainedEvents = control.events;
+        const eventStub: MutableControl | null = retainedEvents.length > 0 ? ({
+          kind: "Component",
+          name,
+          typeName: (control.properties.originalKind as string) ?? control.kind,
+          appearance: emptyAppearance(),
+          properties: { nonVisual: true },
+          events: retainedEvents,
+          children: []
+        } as MutableControl) : null;
+        if (eventStub) controls.set(name, eventStub);
         // Also update form.controls and children lists
+        const replacement: VisualControl[] = eventStub
+          ? [eventStub as VisualControl, ...(inlinedChildren as VisualControl[])]
+          : (inlinedChildren as VisualControl[]);
         const updateList = (list: VisualControl[]) => {
           const idx = list.findIndex((c) => c.name === name);
           if (idx >= 0) {
-            list.splice(idx, 1, ...(inlinedChildren as VisualControl[]));
+            list.splice(idx, 1, ...replacement);
           }
         };
         updateList(form.controls);
@@ -303,6 +332,31 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
   if (form.controls.length === 0) {
     const childNames = new Set([...controls.values()].flatMap((control) => control.children.map((child) => child.name)));
     form.controls = [...controls.values()].filter((control) => !childNames.has(control.name));
+  }
+
+  // Adopt orphan controls that carry contract points but aren't reachable from the
+  // form tree (e.g. ContextMenuStrip attached via `list.ContextMenuStrip = x`, not
+  // Controls.Add). Without this their event handlers never reach contractPoints,
+  // breaking 100% coverage. They are tagged non-visual so the renderer skips them.
+  const reachable = new Set<string>();
+  const markReachable = (list: VisualControl[]) => {
+    for (const c of list) {
+      if (reachable.has(c.name)) continue;
+      reachable.add(c.name);
+      markReachable(c.children);
+    }
+  };
+  markReachable(form.controls);
+  const hasContractDescendant = (control: MutableControl): boolean =>
+    control.events.length > 0 || control.children.some((c) => hasContractDescendant(c as MutableControl));
+  for (const control of controls.values()) {
+    if (reachable.has(control.name)) continue;
+    const childNames = new Set([...controls.values()].flatMap((c) => c.children.map((ch) => ch.name)));
+    if (childNames.has(control.name)) continue; // it's someone's child, will be reached elsewhere
+    if (!hasContractDescendant(control)) continue;
+    control.properties.nonVisual = true;
+    form.controls.push(control);
+    markReachable([control]);
   }
 
   const supportedControls = new Set<string>();
@@ -335,7 +389,8 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
     degradedControls: [...degradedControls].sort(),
     unknownControls: [...unknownControls].sort(),
     controlCoverage,
-    eventStubs
+    eventStubs,
+    contractPoints: []
   };
 
   const report: MigrationReport = {
@@ -382,7 +437,8 @@ function emptyFormSupport(): FormSupportSummary {
       unknownPercent: 0,
       byKind: []
     },
-    eventStubs: []
+    eventStubs: [],
+    contractPoints: []
   };
 }
 
@@ -399,7 +455,7 @@ function stripDesignerSuffix(sourcePath: string): string {
 // block-comment headers are not mistaken for live assignments. String literals
 // are preserved verbatim so semicolons or keywords inside them stay inert in
 // later passes (those passes stop on statement boundaries, not on quotes).
-function stripComments(source: string): string {
+export function stripComments(source: string): string {
   let result = "";
   let i = 0;
   const length = source.length;
@@ -463,12 +519,12 @@ function stripComments(source: string): string {
 
 function parseFieldTypes(source: string): Map<string, string> {
   const fields = new Map<string, string>();
-  const explicitPattern = /^\s*(?:private|protected|internal|public)\s+(?:global::)?([A-Za-z_][\w.<>]*)\s+([A-Za-z_]\w*)\s*;/gm;
+  const explicitPattern = new RegExp(`^\\s*(?:private|protected|internal|public)\\s+(?:global::)?([A-Za-z_][\\w.<>]*)\\s+(${ID})\\s*;`, "gm");
   for (const match of source.matchAll(explicitPattern)) {
     fields.set(match[2], match[1]);
   }
 
-  const implicitPattern = /^\s*(?:global::)?([A-Za-z_][\w.<>]*)\s+([A-Za-z_]\w*)\s*;/gm;
+  const implicitPattern = new RegExp(`^\\s*(?:global::)?([A-Za-z_][\\w.<>]*)\\s+(${ID})\\s*;`, "gm");
   for (const match of source.matchAll(implicitPattern)) {
     const kind = shortTypeName(match[1]);
     if (match[1].includes(".") || isKnownDesignerKind(kind)) {
@@ -481,12 +537,12 @@ function parseFieldTypes(source: string): Map<string, string> {
 
 function parseInstantiations(source: string, fields: Map<string, string>): Array<[string, string]> {
   const instances: Array<[string, string]> = [];
-  const typedPattern = /(?:this\.)?([A-Za-z_]\w*)\s*=\s*new\s+(?:global::)?([A-Za-z_][\w.]*)\s*\(/g;
+  const typedPattern = new RegExp(`(?:this\\.)?(${ID})\\s*=\\s*new\\s+(?:global::)?([A-Za-z_][\\w.]*)\\s*\\(`, "g");
   for (const match of source.matchAll(typedPattern)) {
     instances.push([match[1], match[2]]);
   }
 
-  const targetTypedPattern = /(?:this\.)?([A-Za-z_]\w*)\s*=\s*new\s*\(\s*\)/g;
+  const targetTypedPattern = new RegExp(`(?:this\\.)?(${ID})\\s*=\\s*new\\s*\\(\\s*\\)`, "g");
   for (const match of source.matchAll(targetTypedPattern)) {
     const declaredType = fields.get(match[1]);
     if (declaredType) instances.push([match[1], declaredType]);
@@ -501,7 +557,7 @@ function applyPropertyAssignments(
   columns: Map<string, MutableColumn>,
   form: VisualForm
 ) {
-  const controlPropertyPattern = /(?:this\.)?([A-Za-z_]\w*)\.([A-Za-z_]\w*)\s*=\s*([^;]+);/g;
+  const controlPropertyPattern = new RegExp(`(?:this\\.)?(${ID})\\.([A-Za-z_]\\w*)\\s*=\\s*([^;]+);`, "g");
   const consumedRanges: Array<[number, number]> = [];
 
   for (const match of source.matchAll(controlPropertyPattern)) {
@@ -525,7 +581,7 @@ function applyPropertyAssignments(
     }
   }
 
-  const formPropertyPattern = /(?:this\.)?([A-Za-z_]\w*)\s*=\s*([^;]+);/g;
+  const formPropertyPattern = new RegExp(`(?:this\\.)?(${ID})\\s*=\\s*([^;]+);`, "g");
   for (const match of source.matchAll(formPropertyPattern)) {
     if (consumedRanges.some(([start, end]) => match.index >= start && match.index < end)) continue;
 
@@ -621,6 +677,21 @@ function assignControlProperty(control: MutableControl, property: string, value:
     case "SplitterDistance":
       if (typeof value === "number") control.splitterDistance = value;
       break;
+    case "CheckedBoxes":
+      control.appearance.checkedBoxes = value === true;
+      break;
+    case "Style":
+      control.appearance.style = String(value ?? "");
+      break;
+    case "Rows":
+      if (typeof value === "number") control.appearance.rows = value;
+      break;
+    case "Zoom":
+      if (typeof value === "number") control.appearance.zoom = value;
+      break;
+    case "AutoZoom":
+      control.appearance.autoZoom = value === true;
+      break;
     case "Checked":
       if (typeof value === "boolean") control.appearance.checked = value;
       break;
@@ -689,15 +760,6 @@ function assignControlProperty(control: MutableControl, property: string, value:
       break;
     case "SizeMode":
       control.appearance.sizeMode = String(value ?? "");
-      break;
-    case "Rows":
-      if (typeof value === "number") control.appearance.rows = value;
-      break;
-    case "Zoom":
-      if (typeof value === "number") control.appearance.zoom = value;
-      break;
-    case "AutoZoom":
-      if (typeof value === "boolean") control.appearance.autoZoom = value;
       break;
     case "Url":
       control.appearance.url = parseUri(value);
@@ -774,20 +836,74 @@ function assignFormProperty(form: VisualForm, property: string, value: unknown) 
   }
 }
 
-function applyEvents(source: string, controls: Map<string, MutableControl>) {
-  const constructorPattern = /(?:this\.)?([A-Za-z_]\w*)\.([A-Za-z_]\w*)\s*\+=\s*new\s+[A-Za-z_][\w.]*\s*\(\s*(?:this\.)?([A-Za-z_]\w*)\s*\)/g;
+function applyEvents(source: string, controls: Map<string, MutableControl>, form: VisualForm, fields: Map<string, string>) {
+  // An event may target a non-visual component (NotifyIcon/Timer/ToolTip) that was
+  // filtered out of the controls map. To attribute the contract point to the right
+  // name (not the form), lazily register a minimal nonVisual control for it.
+  const ensureComponent = (name: string): MutableControl => {
+    let c = controls.get(name);
+    if (!c) {
+      c = {
+        kind: "Component",
+        name,
+        typeName: fields.get(name) ?? "Component",
+        appearance: emptyAppearance(),
+        properties: { nonVisual: true },
+        events: [],
+        children: []
+      } as MutableControl;
+      controls.set(name, c);
+    }
+    return c;
+  };
+  const pushEvent = (target: string, event: string, handler: string) => {
+    const control = controls.get(target);
+    const bag = control ? control.events : (form.events ??= []);
+    if (bag.some((e) => e.event === event && e.handler === handler)) return;
+    bag.push({ event, handler });
+  };
+  const hasEvent = (target: string, event: string): boolean => {
+    const control = controls.get(target);
+    const bag = control ? control.events : (form.events ?? []);
+    return bag.some((e) => e.event === event);
+  };
+  // A `this.X += ...` where X is a control name targets that control; otherwise
+  // (X not a known control) it is a form-level event (this.Load, this.FormClosing…).
+  const resolveTarget = (raw: string): string => (controls.has(raw) ? raw : form.name);
+
+  const constructorPattern = new RegExp(`(?:this\\.)?(${ID})\\.([A-Za-z_]\\w*)\\s*\\+=\\s*new\\s+[A-Za-z_][\\w.]*(?:<[^>]*>)?\\s*\\(\\s*(?:this\\.)?(${ID})\\s*\\)`, "g");
   for (const match of source.matchAll(constructorPattern)) {
-    const control = controls.get(match[1]);
-    if (!control) continue;
-    control.events.push({ event: match[2], handler: match[3] });
+    if (!controls.has(match[1]) && fields.has(match[1])) ensureComponent(match[1]);
+    pushEvent(match[1], match[2], match[3]);
   }
 
-  const directPattern = /(?:this\.)?([A-Za-z_]\w*)\.([A-Za-z_]\w*)\s*\+=\s*(?:this\.)?([A-Za-z_]\w*)\s*;/g;
+  const directPattern = new RegExp(`(?:this\\.)?(${ID})\\.([A-Za-z_]\\w*)\\s*\\+=\\s*(?:this\\.)?(${ID})\\s*;`, "g");
   for (const match of source.matchAll(directPattern)) {
-    const control = controls.get(match[1]);
-    if (!control) continue;
-    if (control.events.some((event) => event.event === match[2] && event.handler === match[3])) continue;
-    control.events.push({ event: match[2], handler: match[3] });
+    if (!controls.has(match[1]) && fields.has(match[1])) ensureComponent(match[1]);
+    pushEvent(match[1], match[2], match[3]);
+  }
+
+  // Form-level events: `this.Event += new EventHandler(this.Handler);` or
+  // `this.Event += this.Handler;` — no control segment, target is the form.
+  const formCtorPattern = /this\.([A-Za-z_]\w*)\s*\+=\s*new\s+[A-Za-z_][\w.]*(?:<[^>]*>)?\s*\(\s*(?:this\.)?([A-Za-z_]\w*)\s*\)/g;
+  for (const match of source.matchAll(formCtorPattern)) {
+    if (controls.has(match[1])) continue; // already handled as a control event
+    pushEvent(form.name, match[1], match[2]);
+  }
+  const formDirectPattern = /this\.([A-Za-z_]\w*)\s*\+=\s*this\.([A-Za-z_]\w*)\s*;/g;
+  for (const match of source.matchAll(formDirectPattern)) {
+    if (controls.has(match[1])) continue;
+    pushEvent(form.name, match[1], match[2]);
+  }
+
+  // Lambda / anonymous handlers: `x.Event += (s, e) => ...` or `x.Event += delegate {...}`.
+  // No named method to trace, but it is still a contract point (inline logic to migrate),
+  // so record it with a synthetic handler name so it is never silently dropped.
+  const lambdaPattern = new RegExp(`(?:this\\.)?(${ID})\\.([A-Za-z_]\\w*)\\s*\\+=\\s*(?:\\([^)]*\\)\\s*=>|delegate\\b|[A-Za-z_]\\w*\\s*=>)`, "g");
+  for (const match of source.matchAll(lambdaPattern)) {
+    const target = resolveTarget(match[1]);
+    if (hasEvent(target, match[2])) continue;
+    pushEvent(target, match[2], `${match[1]}_${match[2]}_inline`);
   }
 }
 
@@ -987,7 +1103,7 @@ function isListLikeKind(kind: string): boolean {
 
 function applyControlHierarchy(source: string, controls: Map<string, MutableControl>, form: VisualForm) {
   const childParents = new Map<string, string>();
-  const controlAddPattern = /(?:this\.)?([A-Za-z_]\w*)\.Controls\.Add\(\s*(?:this\.)?([A-Za-z_]\w*)\s*\)/g;
+  const controlAddPattern = new RegExp(`(?:this\\.)?(${ID})\\.Controls\\.Add\\(\\s*(?:this\\.)?(${ID})\\s*\\)`, "g");
   for (const match of source.matchAll(controlAddPattern)) {
     const parent = controls.get(match[1]);
     const child = controls.get(match[2]);
@@ -996,6 +1112,24 @@ function applyControlHierarchy(source: string, controls: Map<string, MutableCont
       parent.children.push(child);
     }
     childParents.set(child.name, parent.name);
+  }
+
+  // Batch form: `parent.Controls.AddRange(new Control[] { a, b, c });` — the VS
+  // default for containers with several children. Without this the children are
+  // never parented, so both the visual tree and event coverage break.
+  const controlAddRangePattern = /(?:this\.)?([A-Za-z_]\w*)\.Controls\.AddRange\(\s*new\s+[A-Za-z_][\w.]*\[\]\s*\{([\s\S]*?)\}\s*\)/g;
+  for (const match of source.matchAll(controlAddRangePattern)) {
+    const parent = controls.get(match[1]);
+    if (!parent) continue;
+    const refs = [...match[2].matchAll(/(?:this\.)?([A-Za-z_]\w*)/g)].map((r) => r[1]);
+    for (const ref of refs) {
+      const child = controls.get(ref);
+      if (!child || child.name === parent.name) continue;
+      if (!parent.children.some((existing) => existing.name === child.name)) {
+        parent.children.push(child);
+      }
+      childParents.set(child.name, parent.name);
+    }
   }
 
   const formAddPattern = /(?:^|[;\r\n])\s*(?:this\.)?Controls\.Add\(\s*(?:this\.)?([A-Za-z_]\w*)\s*\)/g;
@@ -1007,25 +1141,48 @@ function applyControlHierarchy(source: string, controls: Map<string, MutableCont
     }
     childParents.set(child.name, form.name);
   }
+
+  // Batch form at form level: `this.Controls.AddRange(new Control[] { a, b });`
+  const formAddRangePattern = /(?:^|[;\r\n])\s*(?:this\.)?Controls\.AddRange\(\s*new\s+[A-Za-z_][\w.]*\[\]\s*\{([\s\S]*?)\}\s*\)/g;
+  for (const match of source.matchAll(formAddRangePattern)) {
+    const refs = [...match[1].matchAll(/(?:this\.)?([A-Za-z_]\w*)/g)].map((r) => r[1]);
+    for (const ref of refs) {
+      const child = controls.get(ref);
+      if (!child) continue;
+      if (!form.controls.some((existing) => existing.name === child.name)) {
+        form.controls.push(child);
+      }
+      childParents.set(child.name, form.name);
+    }
+  }
 }
 
 function applyToolStripHierarchy(source: string, controls: Map<string, MutableControl>) {
-  const pattern = /(?:this\.)?([A-Za-z_]\w*)\.(?:Items|DropDownItems)\.AddRange\(\s*new\s+[A-Za-z_][\w.]*\[\]\s*\{([\s\S]*?)\}\s*\);/g;
-  for (const match of source.matchAll(pattern)) {
-    const parent = controls.get(match[1]);
-    if (!parent) continue;
-    if (!isToolStripContainerKind(parent.kind)) continue;
-
-    const refs = [...match[2].matchAll(/(?:this\.)?([A-Za-z_]\w*)/g)]
-      .map((ref) => ref[1])
-      .filter((name) => controls.has(name) && name !== parent.name);
-
-    for (const ref of refs) {
-      const child = controls.get(ref)!;
+  const attach = (parentName: string, refNames: string[]) => {
+    const parent = controls.get(parentName);
+    if (!parent) return;
+    if (!isToolStripContainerKind(parent.kind)) return;
+    for (const ref of refNames) {
+      if (ref === parent.name) continue;
+      const child = controls.get(ref);
+      if (!child) continue;
       if (!parent.children.some((existing) => existing.name === child.name)) {
         parent.children.push(child);
       }
     }
+  };
+
+  // Batch form: `x.Items.AddRange(new T[] { a, b, c });`
+  const rangePattern = /(?:this\.)?([A-Za-z_]\w*)\.(?:Items|DropDownItems)\.AddRange\(\s*new\s+[A-Za-z_][\w.]*\[\]\s*\{([\s\S]*?)\}\s*\);/g;
+  for (const match of source.matchAll(rangePattern)) {
+    const refs = [...match[2].matchAll(/(?:this\.)?([A-Za-z_]\w*)/g)].map((r) => r[1]);
+    attach(match[1], refs);
+  }
+
+  // Single form: `x.Items.Add(this.a);` / `x.DropDownItems.Add(this.a);`
+  const singlePattern = /(?:this\.)?([A-Za-z_]\w*)\.(?:Items|DropDownItems)\.Add\(\s*(?:this\.)?([A-Za-z_]\w*)\s*\)\s*;/g;
+  for (const match of source.matchAll(singlePattern)) {
+    attach(match[1], [match[2]]);
   }
 }
 
@@ -1656,8 +1813,8 @@ function inferKindFromName(name: string): string {
   return best ?? name;
 }
 
-// Recursively replace control.kind with its resolved base kind, preserving
-// the original kind in properties.originalKind for traceability.
+// Attach custom control property metadata to a control tree, keyed by the
+// control's original (pre-resolution) kind, for smart placeholder rendering.
 function tagCustomProps(control: MutableControl, baseKindMap?: Map<string, string>, controlProps?: Map<string, Array<{ name: string; type: string }>>): void {
   // Attach custom control properties for smart placeholder rendering
   if (controlProps && controlProps.size > 0) {
