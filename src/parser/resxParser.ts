@@ -61,7 +61,7 @@ export type ResxProps = {
   text?: string;
   dock?: string;
   anchor?: string[];
-  font?: { family: string; size: number };
+  font?: { family: string; size: number; bold?: boolean; italic?: boolean; underline?: boolean; strikeout?: boolean };
   enabled?: boolean;
   autoSize?: boolean;
   padding?: { left: number; top: number; right: number; bottom: number };
@@ -101,11 +101,19 @@ export function applyResxToProps(controlName: string, resx: ResxData): ResxProps
   const anchor = props.get("Anchor");
   if (anchor) result.anchor = anchor.split(",").map((s) => s.trim());
 
-  // Font: "Microsoft Sans Serif, 9.75pt" -> { family, size }
+  // Font: "Segoe UI, 9.75pt, style=Bold, Italic" -> { family, size, bold, italic, ... }
   const font = props.get("Font");
   if (font) {
     const m = font.match(/^([^,]+),\s*([\d.]+)pt/);
-    if (m) result.font = { family: m[1], size: Number(m[2]) };
+    if (m) {
+      const parsed: NonNullable<ResxProps["font"]> = { family: m[1].trim(), size: Number(m[2]) };
+      const style = font.match(/style=([A-Za-z,\s]+)/i)?.[1] ?? "";
+      if (/\bBold\b/i.test(style)) parsed.bold = true;
+      if (/\bItalic\b/i.test(style)) parsed.italic = true;
+      if (/\bUnderline\b/i.test(style)) parsed.underline = true;
+      if (/\bStrikeout\b/i.test(style)) parsed.strikeout = true;
+      result.font = parsed;
+    }
   }
 
   const enabled = props.get("Enabled");

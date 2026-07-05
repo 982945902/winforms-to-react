@@ -1229,7 +1229,14 @@ function applyResxToControls(controls: Map<string, MutableControl>, form: Visual
       control.anchor = props.anchor;
     }
     if (props.font && !control.appearance.font) {
-      control.appearance.font = { family: props.font.family, size: props.font.size };
+      control.appearance.font = {
+        family: props.font.family,
+        size: props.font.size,
+        ...(props.font.bold ? { bold: true } : {}),
+        ...(props.font.italic ? { italic: true } : {}),
+        ...(props.font.underline ? { underline: true } : {}),
+        ...(props.font.strikeout ? { strikeout: true } : {})
+      };
     }
     if (props.enabled != null && control.appearance.enabled == null) {
       control.appearance.enabled = props.enabled;

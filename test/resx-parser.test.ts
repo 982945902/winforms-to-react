@@ -94,4 +94,20 @@ describe("resxParser", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("parses font style flags (Bold/Italic) from resx Font values", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wf2react-resx-font-"));
+    try {
+      const file = join(dir, "F.resx");
+      await writeFile(file, `<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <data name="lbl.Font" type="System.Drawing.Font, System.Drawing"><value>Segoe UI, 9.75pt, style=Bold, Italic</value></data>
+</root>`, "utf8");
+      const data = await parseResx(file);
+      const props = applyResxToProps("lbl", data);
+      expect(props.font).toEqual({ family: "Segoe UI", size: 9.75, bold: true, italic: true });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
