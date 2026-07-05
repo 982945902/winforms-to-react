@@ -1818,12 +1818,15 @@ function resolveBaseKind(kind: string, baseKindMap?: Map<string, string>): strin
 }
 
 // Infer a WinForms control kind from a class name by checking if any known
-// control kind is a suffix or substring of the name. Prefers the longest match.
+// control kind is a SUFFIX of the name (WinForms custom-control convention is
+// <Prefix><BaseKind>, e.g. FancyButton, BlackStyleProgressBar). Prefer the longest
+// suffix match. Suffix (not any-substring) avoids misclassifying e.g. LabelledMeter
+// as Label just because "Label" appears in the interior of the name.
 function inferKindFromName(name: string): string {
   let best: string | undefined;
   let bestLen = 0;
   for (const kind of SUPPORTED_CONTROLS) {
-    if (name.includes(kind) && kind.length > bestLen) {
+    if (name.endsWith(kind) && kind.length > bestLen) {
       best = kind;
       bestLen = kind.length;
     }

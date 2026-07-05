@@ -81,6 +81,7 @@ internal sealed class BlackStyleProgressBar : Control {}
 public class GenericHost<T> : UserControl where T : Control {}
 public class MyGridHost : GenericHost<DataGridView> {}
 public sealed partial class DerivedDeep : FancyButton {}
+internal sealed class LabelledMeter : Control {}
 `, "utf8");
 
       await writeFile(join(root, "Form1.Designer.cs"), `
@@ -91,6 +92,7 @@ partial class Form1
     private BlackStyleProgressBar prog1;
     private MyGridHost grid1;
     private DerivedDeep dd1;
+    private LabelledMeter meter1;
 
     private void InitializeComponent()
     {
@@ -99,6 +101,7 @@ partial class Form1
         this.prog1 = new BlackStyleProgressBar();
         this.grid1 = new MyGridHost();
         this.dd1 = new DerivedDeep();
+        this.meter1 = new LabelledMeter();
         this.lv1.Location = new System.Drawing.Point(8, 8);
         this.lv1.Size = new System.Drawing.Size(100, 80);
         this.btn1.Location = new System.Drawing.Point(8, 100);
@@ -110,7 +113,10 @@ partial class Form1
         this.grid1.Size = new System.Drawing.Size(200, 80);
         this.dd1.Location = new System.Drawing.Point(120, 100);
         this.dd1.Size = new System.Drawing.Size(75, 23);
+        this.meter1.Location = new System.Drawing.Point(120, 130);
+        this.meter1.Size = new System.Drawing.Size(75, 20);
         this.ClientSize = new System.Drawing.Size(340, 160);
+        this.Controls.Add(this.meter1);
         this.Controls.Add(this.dd1);
         this.Controls.Add(this.grid1);
         this.Controls.Add(this.prog1);
@@ -131,6 +137,11 @@ partial class Form1
       const prog = result.forms[0].controls.find((c) => c.name === "prog1");
       expect(prog?.kind).toBe("ProgressBar");
       expect(prog?.properties.originalKind).toBe("BlackStyleProgressBar");
+
+      // "LabelledMeter" contains "Label" as an interior substring but must NOT be
+      // misclassified as Label (name heuristic is suffix-only, not any-substring).
+      const meter = result.forms[0].controls.find((c) => c.name === "meter1");
+      expect(meter?.kind).not.toBe("Label");
 
       const grid = result.forms[0].controls.find((c) => c.name === "grid1");
       expect(grid?.kind).toBe("DataGridView");
