@@ -899,4 +899,22 @@ describe("parseDesignerSource DataGridView nested style properties", () => {
     // 4-arg form is A,R,G,B → rgba(r,g,b, a/255).
     expect(lbl?.appearance?.backColor).toEqual({ cssColor: "rgba(10, 20, 30, 0.784)" });
   });
+
+  it("parses anonymous inline TreeNode nodes (not just named-variable nodes)", () => {
+    const source = `namespace App { partial class T {
+  private void InitializeComponent() {
+    this.tree = new System.Windows.Forms.TreeView();
+    this.tree.Nodes.AddRange(new System.Windows.Forms.TreeNode[] {
+      new System.Windows.Forms.TreeNode("Root A"),
+      new System.Windows.Forms.TreeNode("Root B")});
+    this.Controls.Add(this.tree);
+  }
+  private System.Windows.Forms.TreeView tree;
+}}`;
+    const result = parseDesignerSource(source, { sourcePath: "T.Designer.cs" });
+    const tree = result.controlsByName.get("tree");
+    // Inline node texts must be captured, not tokenized into "new"/"System"/etc.
+    expect(tree?.treeRootNodes).toEqual(["Root A", "Root B"]);
+    expect(tree?.treeNodeTexts).toEqual({ "Root A": "Root A", "Root B": "Root B" });
+  });
 });

@@ -983,6 +983,8 @@ function applyTreeViewHierarchy(source: string, controls: Map<string, MutableCon
 
     const children: Record<string, string[]> = {};
     const roots: string[] = [];
+    // Node text for anonymous inline nodes (text serves as its own id).
+    const nodeTextsInline: Record<string, string> = {};
 
     // parent.Nodes.Add(child)
     const addPattern = /(?:this\.)?([A-Za-z_]\w*)\.Nodes\.Add\(\s*(?:this\.)?([A-Za-z_]\w*)\s*\)/g;
@@ -994,9 +996,22 @@ function applyTreeViewHierarchy(source: string, controls: Map<string, MutableCon
     // parent.Nodes.AddRange(new TreeNode[] { a, b, ... })
     const addRangePattern = /(?:this\.)?([A-Za-z_]\w*)\.Nodes\.AddRange\(\s*new\s+(?:[A-Za-z_][\w.]*\.)?TreeNode\[\]\s*\{([\s\S]*?)\}\s*\)/g;
     for (const m of source.matchAll(addRangePattern)) {
-      const refs = [...m[2].matchAll(/(?:this\.)?([A-Za-z_]\w*)/g)].map(r => r[1]);
-      // If parent is the TreeView itself, these are root nodes
-      if (m[1] === control.name || m[1].startsWith(control.name)) {
+      const body = m[2];
+      const isRoot = m[1] === control.name || m[1].startsWith(control.name);
+      // Anonymous inline form: `new TreeNode("text", new TreeNode[]{...})`.
+      // Tokenizing identifiers here would produce garbage (new/System/TreeNode/…),
+      // so extract the string-literal node texts instead and use them as node ids.
+      if (/\bnew\s+(?:[A-Za-z_][\w.]*\.)?TreeNode\s*\(/.test(body)) {
+        const texts = [...body.matchAll(/(?:[A-Za-z_][\w.]*\.)?TreeNode\s*\(\s*(@?"(?:[^"\\]|\\.|"")*")/g)]
+          .map((t) => String(parseValue(t[1])));
+        for (const txt of texts) {
+          nodeTextsInline[txt] = txt;
+          if (isRoot) roots.push(txt);
+        }
+        continue;
+      }
+      const refs = [...body.matchAll(/(?:this\.)?([A-Za-z_]\w*)/g)].map((r) => r[1]);
+      if (isRoot) {
         roots.push(...refs);
       } else {
         if (!children[m[1]]) children[m[1]] = [];
@@ -1018,7 +1033,7 @@ function applyTreeViewHierarchy(source: string, controls: Map<string, MutableCon
     if (roots.length) control.treeRootNodes = roots;
 
     // Capture node variable name -> text mapping
-    const nodeTexts: Record<string, string> = {};
+    const nodeTexts: Record<string, string> = { ...nodeTextsInline };
     const namePattern = /(?:this\.)?([A-Za-z_]\w*)\s*=\s*new\s+(?:[A-Za-z_][\w.]*\.)?TreeNode\s*\(\s*@?"((?:[^"\\]|\\.|"")*)"/g;
     for (const m of source.matchAll(namePattern)) {
       nodeTexts[m[1]] = String(parseValue(m[2]));
