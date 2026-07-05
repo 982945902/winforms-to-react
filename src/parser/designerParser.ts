@@ -1362,7 +1362,7 @@ function isToolStripContainerKind(kind: string): boolean {
 // consume them; visual properties (Font/ForeColor/BackColor) are routed to
 // appearance when they apply to the control's own DefaultCellStyle.
 function applyNestedControlProperties(source: string, controls: Map<string, MutableControl>) {
-  const pattern = /(?:this\.)?([A-Za-z_]\w*)\.([A-Za-z_]\w*)\.([A-Za-z_]\w*)\s*=\s*([^;]+);/g;
+  const pattern = new RegExp(`(?:this\\.)?(${ID})\\.([A-Za-z_]\\w*)\\.([A-Za-z_]\\w*)\\s*=\\s*(${VALUE});`, "g");
   for (const match of source.matchAll(pattern)) {
     const target = match[1];
     const outer = match[2];

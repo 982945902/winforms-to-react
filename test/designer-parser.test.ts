@@ -814,6 +814,7 @@ partial class GridNestedForm
         this.grid1.DefaultCellStyle.SelectionBackColor = System.Drawing.Color.FromArgb(0, 120, 215);
         this.grid1.ColumnHeadersDefaultCellStyle.BackColor = System.Drawing.Color.FromArgb(230, 230, 230);
         this.grid1.AlternatingRowsDefaultCellStyle.BackColor = System.Drawing.Color.FromArgb(245, 245, 245);
+        this.grid1.DefaultCellStyle.Format = "0.00;(0.00);-";
         this.col1.HeaderText = "Name";
         this.col1.Width = 100;
         this.grid1.Location = new System.Drawing.Point(8, 8);
@@ -837,6 +838,8 @@ describe("parseDesignerSource DataGridView nested style properties", () => {
     expect((grid?.properties["DefaultCellStyle.SelectionBackColor"] as { cssColor: string })?.cssColor).toBe("rgb(0, 120, 215)");
     expect((grid?.properties["ColumnHeadersDefaultCellStyle.BackColor"] as { cssColor: string })?.cssColor).toBe("rgb(230, 230, 230)");
     expect((grid?.properties["AlternatingRowsDefaultCellStyle.BackColor"] as { cssColor: string })?.cssColor).toBe("rgb(245, 245, 245)");
+    // Nested string value with embedded semicolons (a .NET section format) must not truncate.
+    expect(grid?.properties["DefaultCellStyle.Format"]).toBe("0.00;(0.00);-");
     expect(grid?.columns).toEqual([{ name: "col1", headerText: "Name", width: 100, kind: "DataGridViewTextBoxColumn" }]);
   });
 
