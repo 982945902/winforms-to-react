@@ -917,4 +917,25 @@ describe("parseDesignerSource DataGridView nested style properties", () => {
     expect(tree?.treeRootNodes).toEqual(["Root A", "Root B"]);
     expect(tree?.treeNodeTexts).toEqual({ "Root A": "Root A", "Root B": "Root B" });
   });
+
+  it("parses NumericUpDown decimal-array values (new decimal(new int[]{...}))", () => {
+    const source = `namespace App { partial class N {
+  private void InitializeComponent() {
+    this.num = new System.Windows.Forms.NumericUpDown();
+    this.num.Maximum = new decimal(new int[] { 1000, 0, 0, 0});
+    this.num.Minimum = new decimal(new int[] { 10, 0, 0, 0});
+    this.num.Value = new decimal(new int[] { 50, 0, 0, 0});
+    this.num.Increment = new decimal(new int[] { 5, 0, 0, 65536});
+    this.Controls.Add(this.num);
+  }
+  private System.Windows.Forms.NumericUpDown num;
+}}`;
+    const result = parseDesignerSource(source, { sourcePath: "N.Designer.cs" });
+    const num = result.controlsByName.get("num");
+    expect(num?.appearance?.minimum).toBe(10);
+    expect(num?.appearance?.maximum).toBe(1000);
+    expect(num?.appearance?.value).toBe(50);
+    // scale byte (65536 >> 16 = 1) → 5 / 10^1 = 0.5
+    expect(num?.appearance?.increment).toBe(0.5);
+  });
 });

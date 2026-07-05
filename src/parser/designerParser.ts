@@ -724,17 +724,23 @@ function assignControlProperty(control: MutableControl, property: string, value:
       if (typeof value === "number") control.appearance.selectedIndex = value;
       break;
     case "Value":
-      control.appearance.value = typeof value === "number" ? value : String(value ?? "");
+      control.appearance.value = coerceDecimal(value) ?? (typeof value === "number" ? value : String(value ?? ""));
       break;
-    case "Minimum":
-      if (typeof value === "number") control.appearance.minimum = value;
+    case "Minimum": {
+      const n = coerceDecimal(value);
+      if (n != null) control.appearance.minimum = n;
       break;
-    case "Maximum":
-      if (typeof value === "number") control.appearance.maximum = value;
+    }
+    case "Maximum": {
+      const n = coerceDecimal(value);
+      if (n != null) control.appearance.maximum = n;
       break;
-    case "Increment":
-      if (typeof value === "number") control.appearance.increment = value;
+    }
+    case "Increment": {
+      const n = coerceDecimal(value);
+      if (n != null) control.appearance.increment = n;
       break;
+    }
     case "Format":
       control.appearance.format = String(value ?? "");
       break;
@@ -776,6 +782,23 @@ function assignControlProperty(control: MutableControl, property: string, value:
       control.properties[property] = value;
       break;
   }
+}
+
+// Coerce a NumericUpDown numeric property to a number. Handles a plain number,
+// a numeric string, and the VS Designer decimal form
+// `new decimal(new int[] { 1000, 0, 0, 0 })` (value in element[0]; element[3]
+// high byte encodes the decimal scale — divide by 10^scale for fractional values).
+function coerceDecimal(value: unknown): number | undefined {
+  if (typeof value === "number") return value;
+  const raw = String(value ?? "");
+  const arr = raw.match(/new\s+decimal\s*\(\s*new\s+int\[\]\s*\{\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*\}/);
+  if (arr) {
+    const lo = Number(arr[1]);
+    const scale = (Number(arr[4]) >> 16) & 0xff;
+    return scale > 0 ? lo / Math.pow(10, scale) : lo;
+  }
+  const plain = raw.match(/^-?\d+(?:\.\d+)?/);
+  return plain ? Number(plain[0]) : undefined;
 }
 
 function assignColumnProperty(column: MutableColumn, property: string, value: unknown) {
