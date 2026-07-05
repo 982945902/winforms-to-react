@@ -47,6 +47,8 @@ export type VisualColumn = {
   headerText?: string;
   width?: number;
   kind: string;
+  // DataGridView column -> bound data field (a binding contract point).
+  dataPropertyName?: string;
 };
 
 // TableLayoutPanel row/column sizing. SizeType: Absolute|Percent|AutoSize.

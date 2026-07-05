@@ -107,6 +107,12 @@ function collectDesignerBindings(controls: VisualControl[]): BindingInfo[] {
     if (ds != null) {
       out.push({ controlName: control.name, dataSource: String(ds), kind: "DataSource (designer)" });
     }
+    // DataGridView column -> bound field is a binding contract point.
+    for (const col of control.columns ?? []) {
+      if (col.dataPropertyName) {
+        out.push({ controlName: `${control.name}.${col.name}`, dataSource: col.dataPropertyName, kind: "Column" });
+      }
+    }
     for (const child of control.children ?? []) visit(child);
   };
   for (const c of controls) visit(c);

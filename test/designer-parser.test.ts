@@ -79,6 +79,7 @@ partial class OrderForm
         this.colName.HeaderText = "Name";
         this.colName.Name = "colName";
         this.colName.Width = 120;
+        this.colName.DataPropertyName = "CustomerName";
         //
         // OrderForm
         //
@@ -131,7 +132,7 @@ describe("parseDesignerSource", () => {
 
     const grid = result.controlsByName.get("gridItems");
     expect(grid?.columns).toEqual([
-      { name: "colName", headerText: "Name", width: 120, kind: "DataGridViewTextBoxColumn" }
+      { name: "colName", headerText: "Name", width: 120, kind: "DataGridViewTextBoxColumn", dataPropertyName: "CustomerName" }
     ]);
 
     expect(result.report.supportedControls).toContain("Button");

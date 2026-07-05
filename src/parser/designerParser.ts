@@ -787,6 +787,9 @@ function assignColumnProperty(column: MutableColumn, property: string, value: un
     case "Width":
       if (typeof value === "number") column.width = value;
       break;
+    case "DataPropertyName":
+      column.dataPropertyName = typeof value === "string" ? value : String(value ?? "");
+      break;
     case "Name":
       column.properties[property] = value;
       break;
@@ -1899,6 +1902,7 @@ function stripInternalColumn(column: MutableColumn): VisualColumn {
     kind: column.kind,
     name: column.name,
     headerText: column.headerText,
-    width: column.width
+    width: column.width,
+    ...(column.dataPropertyName ? { dataPropertyName: column.dataPropertyName } : {})
   };
 }
