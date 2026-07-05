@@ -56,10 +56,15 @@ function migrationMd(forms: VisualForm[]): string {
     } else {
       for (const cp of contractPoints) {
         const calls = cp.calledSymbols.length ? ` — calls: ${cp.calledSymbols.join(", ")}` : "";
-        const location = cp.lineStart > 0
-          ? ` (${cp.sourceFile}:${cp.lineStart}-${cp.lineEnd})`
-          : ` — ${cp.sourceFile}`;
-        lines.push(`- [ ] ${cp.controlName}.${cp.event} → ${cp.handler}${location}${calls}`);
+        if (cp.handler.endsWith("_inline")) {
+          // Inline lambda: the synthetic name isn't findable — point at the Designer.
+          lines.push(`- [ ] ${cp.controlName}.${cp.event} → inline lambda (in ${cp.controlName}'s Designer wiring)${calls}`);
+        } else if (cp.lineStart > 0) {
+          lines.push(`- [ ] ${cp.controlName}.${cp.event} → ${cp.handler} (${cp.sourceFile}:${cp.lineStart}-${cp.lineEnd})${calls}`);
+        } else {
+          // Handler referenced in Designer but not found in code-behind.
+          lines.push(`- [ ] ${cp.controlName}.${cp.event} → ${cp.handler} (handler not found in code-behind)${calls}`);
+        }
       }
     }
     lines.push("");

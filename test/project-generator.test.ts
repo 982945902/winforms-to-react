@@ -188,6 +188,47 @@ describe("generateReactProject", () => {
     }
   });
 
+  it("renders actionable MIGRATION.md wording for inline-lambda and orphan handlers", async () => {
+    const outDir = await mkdtemp(join(tmpdir(), "wf2react-migword-"));
+    const mkForm = (): VisualForm => ({
+      kind: "Form",
+      name: "M",
+      sourcePath: "M.Designer.cs",
+      support: {
+        controlsConverted: 2, supportedControls: ["Button"], degradedControls: [], unknownControls: [],
+        controlCoverage: { total: 2, supported: 2, degraded: 0, unknown: 0, supportedPercent: 100, previewablePercent: 100, unknownPercent: 0, byKind: [] },
+        eventStubs: [],
+        contractPoints: [
+          { controlName: "btnInline", event: "Click", handler: "btnInline_Click_inline", sourceFile: "(inline lambda)", lineStart: 0, lineEnd: 0, calledSymbols: [] },
+          { controlName: "btnOrphan", event: "Click", handler: "btnOrphan_Click", sourceFile: "(handler not found)", lineStart: 0, lineEnd: 0, calledSymbols: [] }
+        ]
+      },
+      controls: [],
+      properties: {}
+    });
+    const form = mkForm();
+    try {
+      await generateReactProject({
+        outDir, forms: [form],
+        report: {
+          sourceFiles: ["M.Designer.cs"],
+          forms: [{ name: "M", title: "M", sourcePath: "M.Designer.cs", support: form.support }],
+          formsConverted: 1, controlsConverted: 2,
+          supportedControls: ["Button"], degradedControls: [], unknownControls: [],
+          controlCoverage: form.support.controlCoverage, eventStubs: []
+        }
+      });
+      const migration = await readFile(join(outDir, "MIGRATION.md"), "utf8");
+      // Inline lambda must not present a phantom findable handler name.
+      expect(migration).toContain("btnInline.Click → inline lambda");
+      expect(migration).not.toContain("btnInline_Click_inline");
+      // Orphan handler must say it's missing from code-behind.
+      expect(migration).toContain("btnOrphan.Click → btnOrphan_Click (handler not found in code-behind)");
+    } finally {
+      await rm(outDir, { recursive: true, force: true });
+    }
+  });
+
   it("deduplicates generated files and imports for forms with the same class name", async () => {
     const outDir = await mkdtemp(join(tmpdir(), "wf2react-dupes-"));
     const form: VisualForm = {
