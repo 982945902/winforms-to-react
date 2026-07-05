@@ -37,8 +37,9 @@ const CS_KEYWORDS = new Set([
 // JS \w is ASCII-only; used for handler/control NAMES (types stay ASCII).
 const IDENT = "[A-Za-z_\\u0080-\\uFFFF][\\w\\u0080-\\uFFFF]*";
 // Event handler signature: `... void Name(object sender, ... EventArgs ...)`.
+// Allow C# 8+ nullable annotations (`object? sender`, `EventArgs? e`).
 const HANDLER_RE = new RegExp(
-  `(?:private|protected|public|internal)?\\s*(?:async\\s+)?(?:void|Task)\\s+(${IDENT})\\s*\\(\\s*object\\s+\\w+\\s*,\\s*[A-Za-z_][\\w.]*(?:EventArgs|Args)\\b[^)]*\\)`, "g");
+  `(?:private|protected|public|internal)?\\s*(?:async\\s+)?(?:void|Task)\\s+(${IDENT})\\s*\\(\\s*object\\??\\s+\\w+\\s*,\\s*[A-Za-z_][\\w.]*(?:EventArgs|Args)\\??\\b[^)]*\\)`, "g");
 // Method invocation inside a body: `Foo(` or `a.b.Foo(`.
 const CALL_RE = /(?<![.\w])([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*\(/g;
 // Navigation: `new SomeForm(...).Show()` / `.ShowDialog()` or `x.Show(`/`x.ShowDialog(`.

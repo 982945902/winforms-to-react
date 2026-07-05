@@ -28,6 +28,20 @@ namespace App {
 `;
 
 describe("parseCodeBehind", () => {
+  it("extracts handlers with C# 8+ nullable sender/args signatures", () => {
+    const src = `using System; using System.Windows.Forms;
+public partial class N : Form {
+    private void btn_Click(object? sender, EventArgs e) { SaveOrder(); }
+    private void grid_Cell(object sender, DataGridViewCellEventArgs? e) { Refresh(); }
+}`;
+    const info = parseCodeBehind(src, "/proj/N.cs");
+    const names = info.handlers.map((h) => h.handler).sort();
+    // Both nullable-annotated signatures must be extracted (not "handler not found").
+    expect(names).toEqual(["btn_Click", "grid_Cell"]);
+    const btn = info.handlers.find((h) => h.handler === "btn_Click");
+    expect(btn?.calledSymbols).toContain("SaveOrder");
+  });
+
   it("extracts event handlers with line ranges and called symbols", () => {
     const info = parseCodeBehind(CODE_BEHIND, "/proj/OrderForm.cs");
     const byName = Object.fromEntries(info.handlers.map((h) => [h.handler, h]));
