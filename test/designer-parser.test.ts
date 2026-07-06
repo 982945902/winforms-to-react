@@ -870,6 +870,61 @@ describe("parseDesignerSource DataGridView nested style properties", () => {
     expect(tlp?.tableLayout?.columnSpan).toEqual({ lblHeader: 2, btnWide: 2 });
   });
 
+  it("auto-flows single-arg Controls.Add children into successive TableLayoutPanel cells", () => {
+    const source = `namespace App { partial class FlowForm {
+  private void InitializeComponent() {
+    this.tlp = new System.Windows.Forms.TableLayoutPanel();
+    this.a = new System.Windows.Forms.TextBox();
+    this.b = new System.Windows.Forms.Label();
+    this.c = new System.Windows.Forms.Button();
+    this.d = new System.Windows.Forms.Panel();
+    this.tlp.ColumnCount = 1;
+    this.tlp.RowCount = 4;
+    this.tlp.ColumnStyles.Add(new System.Windows.Forms.ColumnStyle(System.Windows.Forms.SizeType.Percent, 100F));
+    this.tlp.Controls.Add(this.a);
+    this.tlp.Controls.Add(this.b);
+    this.tlp.Controls.Add(this.c);
+    this.tlp.Controls.Add(this.d);
+    this.Controls.Add(this.tlp);
+  }
+  private System.Windows.Forms.TableLayoutPanel tlp;
+  private System.Windows.Forms.TextBox a;
+  private System.Windows.Forms.Label b;
+  private System.Windows.Forms.Button c;
+  private System.Windows.Forms.Panel d;
+}}`;
+    const result = parseDesignerSource(source, { sourcePath: "FlowForm.Designer.cs" });
+    const tlp = result.controlsByName.get("tlp");
+    // Single-column table: each child flows into its own row (source order),
+    // instead of all defaulting to (0,0) and overlapping.
+    expect(tlp?.tableLayout?.cells).toEqual({ a: [0, 0], b: [0, 1], c: [0, 2], d: [0, 3] });
+  });
+
+  it("auto-flows across columns before wrapping rows (ColumnCount>1)", () => {
+    const source = `namespace App { partial class Grid2 {
+  private void InitializeComponent() {
+    this.tlp = new System.Windows.Forms.TableLayoutPanel();
+    this.a = new System.Windows.Forms.Label();
+    this.b = new System.Windows.Forms.Label();
+    this.c = new System.Windows.Forms.Label();
+    this.tlp.ColumnCount = 2;
+    this.tlp.RowStyles.Add(new System.Windows.Forms.RowStyle());
+    this.tlp.Controls.Add(this.a);
+    this.tlp.Controls.Add(this.b);
+    this.tlp.Controls.Add(this.c);
+    this.Controls.Add(this.tlp);
+  }
+  private System.Windows.Forms.TableLayoutPanel tlp;
+  private System.Windows.Forms.Label a;
+  private System.Windows.Forms.Label b;
+  private System.Windows.Forms.Label c;
+}}`;
+    const result = parseDesignerSource(source, { sourcePath: "Grid2.Designer.cs" });
+    const tlp = result.controlsByName.get("tlp");
+    // 2 columns: a->(0,0), b->(1,0), c wraps to (0,1)
+    expect(tlp?.tableLayout?.cells).toEqual({ a: [0, 0], b: [1, 0], c: [0, 1] });
+  });
+
   it("does not truncate property values at a semicolon inside a string literal", () => {
     const source = `namespace App { partial class S {
   private void InitializeComponent() {

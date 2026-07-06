@@ -1121,6 +1121,37 @@ function applyTableLayout(source: string, controls: Map<string, MutableControl>)
     }
 
     if (colStyles.length || rowStyles.length || Object.keys(cells).length) {
+      // Children added via single-arg `Controls.Add(child)` (no explicit col/row)
+      // auto-flow into successive cells. WinForms default GrowStyle=AddRows with a
+      // fixed ColumnCount: fill left-to-right across columns, then wrap to the next
+      // row. Without this, such children all land in cell (0,0) and overlap (a
+      // Dock=Fill child then covers everything). Preserve source order.
+      const colCountMatch = source.match(
+        new RegExp(`(?:this\\.)?${control.name}\\.ColumnCount\\s*=\\s*(\\d+)`)
+      );
+      const colCount = colCountMatch ? Math.max(1, Number(colCountMatch[1])) : 1;
+      const singleAdd = new RegExp(
+        `(?:this\\.)?${control.name}\\.Controls\\.Add\\(\\s*(?:this\\.)?(${ID})\\s*\\)`,
+        "g"
+      );
+      const occupied = new Set(Object.values(cells).map(([c, r]) => c + "," + r));
+      let flow = 0;
+      for (const m of source.matchAll(singleAdd)) {
+        const childName = m[1];
+        if (cells[childName]) continue; // explicit cell already assigned
+        // advance past any cells already occupied by explicitly-placed children
+        let col = flow % colCount;
+        let row = Math.floor(flow / colCount);
+        while (occupied.has(col + "," + row)) {
+          flow += 1;
+          col = flow % colCount;
+          row = Math.floor(flow / colCount);
+        }
+        cells[childName] = [col, row];
+        occupied.add(col + "," + row);
+        flow += 1;
+      }
+
       control.tableLayout = { columns: colStyles, rows: rowStyles, cells, columnSpan, rowSpan };
       // Add cell children as actual child control objects so the renderer can
       // find them via control.children. Controls.Add(child, col, row) is not
