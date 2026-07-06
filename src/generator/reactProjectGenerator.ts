@@ -425,7 +425,7 @@ function safeFileName(name: string) {
 }
 
 function winformsCompatTsx() {
-  return `import { useState, useEffect } from "react";
+  return `import { useState, useRef, useEffect } from "react";
 import type { CSSProperties } from "react";
 
 export type VisualFont = {
@@ -615,7 +615,25 @@ export function WinFormHost({ form }: { form: VisualForm }) {
     window.addEventListener("wf-event", handler);
     return () => window.removeEventListener("wf-event", handler);
   }, []);
-  const childStyles = layoutChildren({ width, height }, form.controls);
+  // Live-measure the form surface so Anchor/Dock reflow as the user resizes it
+  // (WinForms resize behavior). Design-time size is the initial + minimum.
+  const surfaceRef = useRef<HTMLDivElement>(null);
+  const [liveSize, setLiveSize] = useState<{ width: number; height: number } | null>(null);
+  useEffect(() => {
+    const el = surfaceRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      const r = entries[0]?.contentRect;
+      if (!r) return;
+      const w = Math.round(r.width);
+      const h = Math.round(r.height);
+      setLiveSize((prev) => (prev && prev.width === w && prev.height === h ? prev : { width: w, height: h }));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [displaySurface]);
+  const layoutSize = liveSize ?? { width, height };
+  const childStyles = layoutChildren(layoutSize, form.controls, { width, height });
   const border = form.formBorderStyle ?? "Sizable";
   const windowStyle: CSSProperties = { width, minHeight: height + 34 };
   if (form.opacity != null) windowStyle.opacity = Math.max(0, Math.min(1, form.opacity));
@@ -626,6 +644,18 @@ export function WinFormHost({ form }: { form: VisualForm }) {
   const hasMaximize = form.maximizeBox !== false && !borderless;
   const hasMinimize = form.minimizeBox !== false && !borderless;
   const hasClose = form.controlBox !== false;
+  const resizable = !borderless && border !== "FixedSingle" && border !== "FixedDialog" && border !== "Fixed3D";
+  const surfaceStyle: CSSProperties = {
+    width,
+    height,
+    backgroundImage: form.backgroundImage ? "url(" + form.backgroundImage + ")" : undefined,
+  };
+  if (resizable) {
+    surfaceStyle.resize = "both";
+    surfaceStyle.overflow = "auto";
+    surfaceStyle.minWidth = Math.min(160, width);
+    surfaceStyle.minHeight = Math.min(120, height);
+  }
   return (
     <article className="wf-window" style={displaySurface ? windowStyle : { width: 160, height: 24 }}>
       <header className="wf-titlebar">
@@ -638,7 +668,7 @@ export function WinFormHost({ form }: { form: VisualForm }) {
         </div>
       </header>
       {displaySurface && (
-        <div className="wf-form-surface" style={{ width, height, backgroundImage: form.backgroundImage ? "url(" + form.backgroundImage + ")" : undefined }}>
+        <div ref={surfaceRef} className="wf-form-surface" style={surfaceStyle}>
           {form.controls.map((control, index) => (
             <WinControl key={control.name} control={control} hostStyle={childStyles[index]} />
           ))}
@@ -680,7 +710,12 @@ type LayoutBox = { x: number; y: number; width: number; height: number };
 // Pass 2: Anchor resizes/repositions undocked children whose anchor set
 // includes opposite edges (Left+Right stretches width, Top+Bottom stretches
 // height) to match the parent client rectangle.
-function layoutChildren(parent: { width: number; height: number }, children: VisualControl[]): (CSSProperties | undefined)[] {
+function layoutChildren(parent: { width: number; height: number }, children: VisualControl[], design?: { width: number; height: number }): (CSSProperties | undefined)[] {
+  // \`parent\` is the live (possibly resized) client size used for placement.
+  // \`design\` is the design-time client size the bounds were authored against;
+  // anchor edge margins are measured against it so they stay constant as the
+  // form is resized (WinForms anchor semantics). Defaults to \`parent\` (no reflow).
+  const dsn = design ?? parent;
   const dockStyles = dockLayout(parent, children);
   const styles = dockStyles.slice();
   for (let i = 0; i < children.length; i += 1) {
@@ -696,19 +731,19 @@ function layoutChildren(parent: { width: number; height: number }, children: Vis
     const b = child.bounds ?? { x: 0, y: 0, width: 0, height: 0 };
     let left = b.x, top = b.y, w = b.width, h = b.height;
     if (hasLeft && hasRight) {
-      const rightEdge = parent.width - (b.x + b.width);
+      const rightEdge = dsn.width - (b.x + b.width);
       left = b.x;
       w = Math.max(0, parent.width - b.x - rightEdge);
     } else if (hasRight && !hasLeft) {
-      const rightEdge = parent.width - (b.x + b.width);
+      const rightEdge = dsn.width - (b.x + b.width);
       left = Math.max(0, parent.width - rightEdge - b.width);
     }
     if (hasTop && hasBottom) {
-      const bottomEdge = parent.height - (b.y + b.height);
+      const bottomEdge = dsn.height - (b.y + b.height);
       top = b.y;
       h = Math.max(0, parent.height - b.y - bottomEdge);
     } else if (hasBottom && !hasTop) {
-      const bottomEdge = parent.height - (b.y + b.height);
+      const bottomEdge = dsn.height - (b.y + b.height);
       top = Math.max(0, parent.height - bottomEdge - b.height);
     }
     styles[i] = { position: "absolute", left, top, width: w, height: h };
@@ -763,7 +798,8 @@ function WinControl({ control, hostStyle }: { control: VisualControl; hostStyle?
   const ownSize = hostStyle
     ? { width: (hostStyle.width as number | undefined) ?? control.bounds?.width ?? 0, height: (hostStyle.height as number | undefined) ?? control.bounds?.height ?? 0 }
     : { width: control.bounds?.width ?? 0, height: control.bounds?.height ?? 0 };
-  const childStyles = isContainerKind(control.kind) ? layoutChildren(ownSize, children) : [];
+  const ownDesign = { width: control.bounds?.width ?? ownSize.width, height: control.bounds?.height ?? ownSize.height };
+  const childStyles = isContainerKind(control.kind) ? layoutChildren(ownSize, children, ownDesign) : [];
 
   // Local interactive state for preview interactivity
   const [localValue, setLocalValue] = useState<string | number | undefined>(

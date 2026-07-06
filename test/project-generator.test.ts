@@ -532,6 +532,14 @@ describe("generateReactProject", () => {
       expect(compat).toContain("fillIndices");
       expect(compat).toContain("hostStyle");
       expect(compat).toContain("isContainerKind");
+      // Runtime resize-reflow: ResizeObserver drives live layout; anchor margins
+      // are measured against the design-time size passed as third arg.
+      expect(compat).toContain("new ResizeObserver");
+      expect(compat).toContain("setLiveSize");
+      expect(compat).toContain("const layoutSize = liveSize ?? { width, height }");
+      expect(compat).toContain("layoutChildren(layoutSize, form.controls, { width, height })");
+      expect(compat).toContain("const dsn = design ?? parent");
+      expect(compat).toContain("dsn.width - (b.x + b.width)");
       expect(compat).toContain("function winStyle");
       expect(compat).toContain("a.foreColor");
       expect(compat).toContain("a.backColor");
