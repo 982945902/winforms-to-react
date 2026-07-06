@@ -925,6 +925,39 @@ describe("parseDesignerSource DataGridView nested style properties", () => {
     expect(tlp?.tableLayout?.cells).toEqual({ a: [0, 0], b: [1, 0], c: [0, 1] });
   });
 
+  it("synthesizes a placeholder for a base-class container so its children stay visible", () => {
+    // gitextensions forms parent controls into MainPanel/ControlsPanel declared
+    // on a base form class (not in this file). Those adds must not be dropped.
+    const source = `namespace App { partial class RebaseForm {
+  private void InitializeComponent() {
+    this.MainLayout = new System.Windows.Forms.TableLayoutPanel();
+    this.btnOk = new System.Windows.Forms.Button();
+    MainPanel.Controls.Add(this.MainLayout);
+    MainPanel.Size = new System.Drawing.Size(800, 400);
+    ControlsPanel.Controls.Add(this.btnOk);
+    ControlsPanel.Location = new System.Drawing.Point(0, 400);
+    ControlsPanel.Size = new System.Drawing.Size(800, 40);
+    this.ClientSize = new System.Drawing.Size(800, 440);
+  }
+  private System.Windows.Forms.TableLayoutPanel MainLayout;
+  private System.Windows.Forms.Button btnOk;
+}}`;
+    const result = parseDesignerSource(source, { sourcePath: "RebaseForm.Designer.cs" });
+    const topNames = result.form.controls.map((c) => c.name);
+    // The base-class containers are synthesized and attached to the form...
+    expect(topNames).toContain("MainPanel");
+    expect(topNames).toContain("ControlsPanel");
+    // ...carrying their real children (which would otherwise be orphaned/hidden).
+    const mainPanel = result.controlsByName.get("MainPanel");
+    const controlsPanel = result.controlsByName.get("ControlsPanel");
+    expect(mainPanel?.children.map((c) => c.name)).toEqual(["MainLayout"]);
+    expect(controlsPanel?.children.map((c) => c.name)).toEqual(["btnOk"]);
+    expect(mainPanel?.bounds).toEqual({ x: 0, y: 0, width: 800, height: 400 });
+    expect(controlsPanel?.bounds).toEqual({ x: 0, y: 400, width: 800, height: 40 });
+    // MainLayout must not be hidden as nonVisual.
+    expect((result.controlsByName.get("MainLayout")?.properties ?? {}).nonVisual).toBeUndefined();
+  });
+
   it("does not truncate property values at a semicolon inside a string literal", () => {
     const source = `namespace App { partial class S {
   private void InitializeComponent() {

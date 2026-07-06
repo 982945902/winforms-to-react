@@ -1198,11 +1198,57 @@ function isListLikeKind(kind: string): boolean {
 
 function applyControlHierarchy(source: string, controls: Map<string, MutableControl>, form: VisualForm) {
   const childParents = new Map<string, string>();
+  // Some Designer files parent controls into a container declared on a BASE
+  // form class (e.g. gitextensions' MainPanel/ControlsPanel on GitExtensionsForm).
+  // That container isn't in this file, so `Container.Controls.Add(child)` would be
+  // dropped and the child orphaned (then hidden as nonVisual → blank form).
+  // Synthesize a placeholder Panel for such unknown parents so the subtree stays
+  // visible. Only for parents that receive a known child (avoids treating random
+  // API calls as containers).
+  const synthParents = new Set<string>();
+  const ensureParent = (name: string): MutableControl | undefined => {
+    if (name === "this" || name === form.name) return undefined; // form itself, handled by formAddPattern
+    // These are sub-panels of a ToolStripContainer/SplitContainer accessed as
+    // `container.SubPanel.Controls.Add(x)`; handled by applyToolStripContainerPanels
+    // / applySplitContainer. Don't synthesize a standalone Panel for them (would
+    // duplicate and overlap the real container content).
+    if (/^(Top|Bottom|Left|Right)ToolStripPanel$|^ContentPanel$|^Panel[12]$/.test(name)) return undefined;
+    let c = controls.get(name);
+    if (c) return c;
+    // Heuristic guard: only synthesize for names referenced as a control
+    // elsewhere (Size/Location/Dock/Padding/BackColor).
+    const looksLikeContainer = new RegExp(`(?:this\\.)?${name}\\.(Size|Location|Dock|Padding|BackColor|Controls)\\b`).test(source);
+    if (!looksLikeContainer) return undefined;
+    // Recover the container's own geometry from the source so it (and its
+    // children) size correctly instead of collapsing.
+    const sizeM = source.match(new RegExp(`(?:this\\.)?${name}\\.Size\\s*=\\s*new\\s+(?:System\\.Drawing\\.)?Size\\(\\s*(-?\\d+)\\s*,\\s*(-?\\d+)\\s*\\)`));
+    const locM = source.match(new RegExp(`(?:this\\.)?${name}\\.Location\\s*=\\s*new\\s+(?:System\\.Drawing\\.)?Point\\(\\s*(-?\\d+)\\s*,\\s*(-?\\d+)\\s*\\)`));
+    const dockM = source.match(new RegExp(`(?:this\\.)?${name}\\.Dock\\s*=\\s*(?:System\\.Windows\\.Forms\\.)?DockStyle\\.(\\w+)`));
+    const bounds = sizeM
+      ? { x: locM ? Number(locM[1]) : 0, y: locM ? Number(locM[2]) : 0, width: Number(sizeM[1]), height: Number(sizeM[2]) }
+      : undefined;
+    c = {
+      kind: "Panel",
+      name,
+      typeName: "Panel",
+      appearance: emptyAppearance(),
+      properties: { synthesizedParent: true },
+      dock: dockM ? dockM[1] : (bounds ? "None" : "Fill"),
+      bounds,
+      events: [],
+      children: []
+    } as MutableControl;
+    controls.set(name, c);
+    synthParents.add(name);
+    return c;
+  };
+
   const controlAddPattern = new RegExp(`(?:this\\.)?(${ID})\\.Controls\\.Add\\(\\s*(?:this\\.)?(${ID})\\s*\\)`, "g");
   for (const match of source.matchAll(controlAddPattern)) {
-    const parent = controls.get(match[1]);
     const child = controls.get(match[2]);
-    if (!parent || !child) continue;
+    if (!child) continue;
+    const parent = ensureParent(match[1]);
+    if (!parent) continue;
     if (!parent.children.some((existing) => existing.name === child.name)) {
       parent.children.push(child);
     }
@@ -1214,12 +1260,13 @@ function applyControlHierarchy(source: string, controls: Map<string, MutableCont
   // never parented, so both the visual tree and event coverage break.
   const controlAddRangePattern = /(?:this\.)?([A-Za-z_]\w*)\.Controls\.AddRange\(\s*new\s+[A-Za-z_][\w.]*\[\]\s*\{([\s\S]*?)\}\s*\)/g;
   for (const match of source.matchAll(controlAddRangePattern)) {
-    const parent = controls.get(match[1]);
-    if (!parent) continue;
     const refs = [...match[2].matchAll(/(?:this\.)?([A-Za-z_]\w*)/g)].map((r) => r[1]);
-    for (const ref of refs) {
-      const child = controls.get(ref);
-      if (!child || child.name === parent.name) continue;
+    const knownChildren = refs.map((ref) => controls.get(ref)).filter((c): c is MutableControl => !!c);
+    if (knownChildren.length === 0) continue;
+    const parent = ensureParent(match[1]);
+    if (!parent) continue;
+    for (const child of knownChildren) {
+      if (child.name === parent.name) continue;
       if (!parent.children.some((existing) => existing.name === child.name)) {
         parent.children.push(child);
       }
@@ -1248,6 +1295,16 @@ function applyControlHierarchy(source: string, controls: Map<string, MutableCont
         form.controls.push(child);
       }
       childParents.set(child.name, form.name);
+    }
+  }
+
+  // Synthesized base-class containers that never got parented themselves are the
+  // top of their subtree — attach them to the form so their children render.
+  for (const name of synthParents) {
+    if (childParents.has(name)) continue;
+    const c = controls.get(name);
+    if (c && !form.controls.some((existing) => existing.name === name)) {
+      form.controls.push(c);
     }
   }
 }
