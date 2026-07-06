@@ -242,12 +242,14 @@ function allocateFormFiles(forms: VisualForm[]): GeneratedFormFile[] {
 function appTsx(forms: GeneratedFormFile[]) {
   const imports = forms.map((item) => `import ${item.importName} from "../forms/${item.fileName}";`).join("\n");
   const formItems = forms
-    .map((item, index) => `{ id: "form-${index}", name: ${JSON.stringify(item.form.name)}, title: ${JSON.stringify(item.form.text ?? item.form.name)}, sourcePath: ${JSON.stringify(item.form.sourcePath)}, controlCount: ${item.form.support.controlsConverted}, degradedCount: ${item.form.support.controlCoverage.degraded}, unknownCount: ${item.form.support.controlCoverage.unknown}, fileName: ${JSON.stringify(item.fileName)}, form: ${item.importName} }`)
+    .map((item, index) => `{ id: "form-${index}", name: ${JSON.stringify(item.form.name)}, title: ${JSON.stringify(item.form.text ?? item.form.name)}, sourcePath: ${JSON.stringify(item.form.sourcePath)}, controlCount: ${item.form.support.controlsConverted}, degradedCount: ${item.form.support.controlCoverage.degraded}, unknownCount: ${item.form.support.controlCoverage.unknown}, fileName: ${JSON.stringify(item.fileName)}, navigations: ${JSON.stringify(item.form.navigations ?? [])}, form: ${item.importName} }`)
     .join(",\n  ");
-  return `import { useState } from "react";
+  return `import { useState, useRef, useEffect } from "react";
 ${imports}
 import report from "../migration-report.json";
 import { WinFormHost } from "./winformsCompat";
+
+type NavEdge = { target: string; modal: boolean; fromHandler?: string };
 
 type PreviewForm = {
   id: string;
@@ -258,6 +260,7 @@ type PreviewForm = {
   degradedCount: number;
   unknownCount: number;
   fileName: string;
+  navigations: NavEdge[];
   form: unknown;
 };
 
@@ -265,14 +268,62 @@ const forms: PreviewForm[] = [
   ${formItems}
 ];
 
+const nameToId = new Map<string, string>();
+for (const item of forms) {
+  nameToId.set(item.name.toLowerCase(), item.id);
+}
+
+type NavFrame = { id: string; modal: boolean };
+
 export default function App() {
   const [selectedFormId, setSelectedFormId] = useState(forms[0]?.id ?? "");
   const [issueMode, setIssueMode] = useState(false);
+  const [navStack, setNavStack] = useState<NavFrame[]>([]);
   const visibleForms = issueMode
     ? forms.filter((item) => item.degradedCount > 0 || item.unknownCount > 0)
     : forms;
   const selectedForm = visibleForms.find((item) => item.id === selectedFormId) ?? visibleForms[0] ?? forms[0];
   const coverage = report.controlCoverage;
+
+  const currentIdRef = useRef(selectedForm?.id ?? "");
+  currentIdRef.current = selectedForm?.id ?? "";
+
+  useEffect(() => {
+    const onWfEvent = (e: Event) => {
+      const { handler } = (e as CustomEvent).detail ?? {};
+      if (!handler) return;
+      const current = forms.find((item) => item.id === currentIdRef.current);
+      const edge = current?.navigations.find((n) => n.fromHandler === handler);
+      if (!edge) return;
+      const targetId = nameToId.get(edge.target.toLowerCase());
+      if (!targetId) {
+        console.debug("[nav] unresolved target form:", edge.target);
+        return;
+      }
+      if (targetId === currentIdRef.current) return;
+      const fromId = currentIdRef.current;
+      setNavStack((prev) => [...prev, { id: fromId, modal: edge.modal }]);
+      setSelectedFormId(targetId);
+    };
+    window.addEventListener("wf-event", onWfEvent);
+    return () => window.removeEventListener("wf-event", onWfEvent);
+  }, []);
+
+  const goBack = () => {
+    setNavStack((prev) => {
+      const next = prev.slice();
+      const frame = next.pop();
+      if (frame) setSelectedFormId(frame.id);
+      return next;
+    });
+  };
+
+  const selectForm = (id: string) => {
+    setNavStack([]);
+    setSelectedFormId(id);
+  };
+
+  const enteredModal = navStack.length > 0 && navStack[navStack.length - 1].modal;
 
   return (
     <main className="preview-shell">
@@ -303,7 +354,7 @@ export default function App() {
             type="button"
             onClick={() => {
               setIssueMode(false);
-              setSelectedFormId(forms[0]?.id ?? "");
+              selectForm(forms[0]?.id ?? "");
             }}
           >
             All
@@ -314,7 +365,7 @@ export default function App() {
             onClick={() => {
               const firstIssue = forms.find((item) => item.degradedCount > 0 || item.unknownCount > 0);
               setIssueMode(true);
-              setSelectedFormId(firstIssue?.id ?? "");
+              selectForm(firstIssue?.id ?? "");
             }}
           >
             Issues
@@ -326,7 +377,7 @@ export default function App() {
               key={item.id}
               className={item.id === selectedForm?.id ? "active" : ""}
               type="button"
-              onClick={() => setSelectedFormId(item.id)}
+              onClick={() => selectForm(item.id)}
             >
               <span>{item.title}</span>
               <small>{item.sourcePath}</small>
@@ -340,7 +391,27 @@ export default function App() {
         </nav>
       </aside>
       <section className="preview-forms">
-        {selectedForm ? <WinFormHost key={selectedForm.id} form={selectedForm.form as any} /> : null}
+        {navStack.length > 0 && (
+          <div className="wf-nav-breadcrumb">
+            <button type="button" className="wf-nav-back" onClick={goBack}>{"←"} 返回</button>
+            <span className="wf-nav-trail">
+              {navStack.map((frame) => {
+                const f = forms.find((item) => item.id === frame.id);
+                return (f?.title ?? frame.id) + " / ";
+              }).join("")}
+              <strong>{selectedForm?.title}{enteredModal ? "(模态)" : ""}</strong>
+            </span>
+          </div>
+        )}
+        {selectedForm ? (
+          enteredModal ? (
+            <div className="wf-modal-backdrop">
+              <WinFormHost key={selectedForm.id} form={selectedForm.form as any} />
+            </div>
+          ) : (
+            <WinFormHost key={selectedForm.id} form={selectedForm.form as any} />
+          )
+        ) : null}
       </section>
     </main>
   );
@@ -591,7 +662,7 @@ export function WinFormHost({ form }: { form: VisualForm }) {
             </div>
           ))}
           {form.navigations?.map((nav, i) => (
-            <div key={"nav" + i} className="wf-pending-item wf-pending-nav">
+            <div key={"nav" + i} className="wf-pending-item wf-pending-nav" title="预览中点击对应控件可跳转到该窗体;后端逻辑仍需接入">
               <span className="wf-pending-ctrl">{nav.modal ? "ShowDialog" : "Show"} → {nav.target}</span>
               {nav.fromHandler && <span className="wf-pending-loc">from {nav.fromHandler}</span>}
             </div>
@@ -1737,6 +1808,45 @@ body {
 
 .wf-pending-nav .wf-pending-ctrl {
   color: #2f6f9f;
+}
+
+.wf-nav-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 6px 10px;
+  background: #eef4fb;
+  border: 1px solid #cddcee;
+  border-radius: 4px;
+  font-size: 12px;
+  color: #34597d;
+}
+
+.wf-nav-back {
+  border: 1px solid #9db8d4;
+  background: #ffffff;
+  color: #2f6f9f;
+  border-radius: 3px;
+  padding: 2px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.wf-nav-back:hover {
+  background: #dceaf8;
+}
+
+.wf-nav-trail strong {
+  color: #1f3d5a;
+}
+
+.wf-modal-backdrop {
+  padding: 24px;
+  background: rgba(20, 30, 45, 0.35);
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px rgba(20, 30, 45, 0.15);
+  display: inline-block;
 }
 
 .wf-check {

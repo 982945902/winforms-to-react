@@ -87,7 +87,7 @@ describe("generateReactProject", () => {
       const report = JSON.parse(await readFile(join(outDir, "migration-report.json"), "utf8"));
 
       expect(app).toContain("WinFormHost");
-      expect(app).toContain("import { useState } from \"react\";");
+      expect(app).toContain("import { useState, useRef, useEffect } from \"react\";");
       expect(app).toContain("import report from \"../migration-report.json\";");
       expect(app).toContain("selectedForm");
       expect(app).toContain("preview-form-list");
@@ -96,6 +96,11 @@ describe("generateReactProject", () => {
       expect(app).toContain("<small>{item.sourcePath}</small>");
       expect(app).toContain("controlCount: 1");
       expect(app).toContain("unknownCount: 0");
+      expect(app).toContain("navigations: [");
+      expect(app).toContain("const nameToId = new Map");
+      expect(app).toContain("window.addEventListener(\"wf-event\"");
+      expect(app).toContain("navStack");
+      expect(app).toContain("wf-nav-back");
       expect(app).toContain("preview-form-badges");
       expect(app).toContain("issueMode");
       expect(app).toContain("visibleForms");
@@ -109,6 +114,84 @@ describe("generateReactProject", () => {
       await rm(outDir, { recursive: true, force: true });
     }
   });
+
+  it("injects per-form navigations and wires wf-event routing for multi-form navigation", async () => {
+    const outDir = await mkdtemp(join(tmpdir(), "wf2react-nav-"));
+    const emptyCoverage = {
+      total: 0,
+      supported: 0,
+      degraded: 0,
+      unknown: 0,
+      supportedPercent: 100,
+      previewablePercent: 100,
+      unknownPercent: 0,
+      byKind: [] as { kind: string; count: number; status: string }[]
+    };
+    const mkForm = (name: string, navigations: VisualForm["navigations"]): VisualForm => ({
+      kind: "Form",
+      name,
+      sourcePath: `src/${name}.Designer.cs`,
+      text: name,
+      clientSize: { width: 200, height: 120 },
+      support: {
+        controlsConverted: 0,
+        supportedControls: [],
+        degradedControls: [],
+        unknownControls: [],
+        controlCoverage: emptyCoverage,
+        eventStubs: [],
+        contractPoints: []
+      },
+      controls: [],
+      properties: {},
+      navigations
+    });
+    const main = mkForm("Main", [
+      { target: "DetailForm", modal: true, fromHandler: "btnDetail_Click" },
+      { target: "ReportForm", modal: false, fromHandler: "btnReport_Click" }
+    ]);
+    const detail = mkForm("DetailForm", []);
+    const forms = [main, detail];
+
+    try {
+      await generateReactProject({
+        outDir,
+        forms,
+        report: {
+          sourceFiles: forms.map((f) => f.sourcePath),
+          forms: forms.map((f) => ({
+            name: f.name,
+            title: f.text ?? f.name,
+            sourcePath: f.sourcePath,
+            support: f.support
+          })),
+          formsConverted: forms.length,
+          controlsConverted: 0,
+          supportedControls: [],
+          degradedControls: [],
+          unknownControls: [],
+          controlCoverage: emptyCoverage,
+          eventStubs: [],
+          contractPoints: []
+        }
+      });
+
+      const app = await readFile(join(outDir, "src", "App.tsx"), "utf8");
+      // Main's navigations are serialized into its formItem
+      expect(app).toContain("\"target\":\"DetailForm\",\"modal\":true,\"fromHandler\":\"btnDetail_Click\"");
+      expect(app).toContain("\"target\":\"ReportForm\",\"modal\":false,\"fromHandler\":\"btnReport_Click\"");
+      // routing scaffold present
+      expect(app).toContain("const nameToId = new Map");
+      expect(app).toContain("nameToId.get(edge.target.toLowerCase())");
+      expect(app).toContain("window.addEventListener(\"wf-event\"");
+      expect(app).toContain("setSelectedFormId(targetId)");
+      expect(app).toContain("wf-modal-backdrop");
+      expect(app).toContain("wf-nav-back");
+    } finally {
+      await rm(outDir, { recursive: true, force: true });
+    }
+  });
+
 
   it("writes MIGRATION.md and renders contract markers for forms with contract points", async () => {
     const outDir = await mkdtemp(join(tmpdir(), "wf2react-mig-"));
