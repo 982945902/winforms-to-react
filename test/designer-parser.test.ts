@@ -1030,4 +1030,36 @@ describe("parseDesignerSource DataGridView nested style properties", () => {
     expect(result.form.minimizeBox).toBe(false);
     expect(result.form.controlBox).toBe(false);
   });
+
+  it("parents ToolStrips added to a ToolStripContainer panel via .Join(...) (not just Controls.Add)", () => {
+    const source = `namespace App { partial class Editor {
+  private System.Windows.Forms.ToolStripContainer tsc;
+  private System.Windows.Forms.MenuStrip menuStrip1;
+  private System.Windows.Forms.ToolStrip toolsToolStrip;
+  private System.Windows.Forms.StatusStrip statusStrip1;
+  private void InitializeComponent() {
+    this.tsc = new System.Windows.Forms.ToolStripContainer();
+    this.menuStrip1 = new System.Windows.Forms.MenuStrip();
+    this.toolsToolStrip = new System.Windows.Forms.ToolStrip();
+    this.statusStrip1 = new System.Windows.Forms.StatusStrip();
+    this.tsc.TopToolStripPanel.Join(this.menuStrip1, 0);
+    this.tsc.LeftToolStripPanel.Join(this.toolsToolStrip, 0);
+    this.tsc.BottomToolStripPanel.Controls.Add(this.statusStrip1);
+    this.tsc.Dock = System.Windows.Forms.DockStyle.Fill;
+    this.ClientSize = new System.Drawing.Size(600, 400);
+    this.Controls.Add(this.tsc);
+  }
+}}`;
+    const result = parseDesignerSource(source, { sourcePath: "Editor.Designer.cs" });
+    const tsc = result.controlsByName.get("tsc");
+    // .Join()-added strips must be parented into the container's panels, not
+    // orphaned at the top level (which would hide them as nonVisual).
+    expect(tsc?.topToolStripChildren).toEqual(["menuStrip1"]);
+    expect(tsc?.leftToolStripChildren).toEqual(["toolsToolStrip"]);
+    expect(tsc?.bottomToolStripChildren).toEqual(["statusStrip1"]);
+    const childNames = tsc?.children.map((c) => c.name) ?? [];
+    expect(childNames).toContain("menuStrip1");
+    expect(childNames).toContain("toolsToolStrip");
+    expect(childNames).toContain("statusStrip1");
+  });
 });

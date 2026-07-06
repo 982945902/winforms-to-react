@@ -1446,8 +1446,11 @@ function applyToolStripContainerPanels(source: string, controls: Map<string, Mut
     const allNames: string[] = [];
     for (const [field, panelName] of panels) {
       const arr: string[] = [];
+      // Designer adds strips to a ToolStripPanel via either
+      // `.PanelName.Controls.Add(x)` or `.PanelName.Join(x[, index])` — the
+      // latter is what VS emits for docked ToolStrips/MenuStrips.
       const pat = new RegExp(
-        `(?:this\\.)?${control.name}\\.${panelName}\\.Controls\\.Add\\(\\s*(?:this\\.)?([A-Za-z_]\\w*)\\s*\\)`,
+        `(?:this\\.)?${control.name}\\.${panelName}\\.(?:Controls\\.Add|Join)\\(\\s*(?:this\\.)?(${ID})\\s*(?:,[^)]*)?\\)`,
         "g"
       );
       for (const m of source.matchAll(pat)) arr.push(m[1]);
