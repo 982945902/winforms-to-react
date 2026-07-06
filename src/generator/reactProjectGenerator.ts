@@ -746,7 +746,7 @@ function layoutChildren(parent: { width: number; height: number }, children: Vis
       const bottomEdge = dsn.height - (b.y + b.height);
       top = Math.max(0, parent.height - bottomEdge - b.height);
     }
-    styles[i] = { position: "absolute", left, top, width: w, height: h };
+    styles[i] = { position: "absolute", left, top, width: w, height: h, zIndex: 1 };
   }
   return styles;
 }

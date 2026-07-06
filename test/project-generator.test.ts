@@ -530,6 +530,9 @@ describe("generateReactProject", () => {
       expect(compat).toContain("dock === \"Right\"");
       expect(compat).toContain("dock === \"Fill\"");
       expect(compat).toContain("fillIndices");
+      // Anchored controls must sit above Dock=Fill siblings (zIndex:1) so a
+      // stretched TabControl overlapping a Dock=Fill nav tree stays clickable.
+      expect(compat).toContain("width: w, height: h, zIndex: 1");
       expect(compat).toContain("hostStyle");
       expect(compat).toContain("isContainerKind");
       // Runtime resize-reflow: ResizeObserver drives live layout; anchor margins
