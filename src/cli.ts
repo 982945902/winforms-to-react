@@ -3,6 +3,9 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { generateReactProject } from "./generator/reactProjectGenerator.js";
 import { generateTanStackFormProject } from "./generator/tanstackFormGenerator.js";
+import { generateRefineProject } from "./generator/refineProjectGenerator.js";
+import { generateNocoBasePlugin } from "./generator/nocobasePluginGenerator.js";
+import { buildProjectIR } from "./ir/projectIr.js";
 import { convertDesignerSources, findDesignerFiles } from "./parser/scanner.js";
 
 type CliOptions = {
@@ -10,6 +13,7 @@ type CliOptions = {
   outDir?: string;
   format?: "json" | "text";
   formEngine?: "compat" | "tanstack";
+  target?: "compat" | "refine" | "nocobase";
 };
 
 async function main() {
@@ -50,6 +54,18 @@ async function runScan(options: CliOptions) {
 async function runConvert(options: CliOptions) {
   const input = resolveRequiredInput(options);
   const outDir = resolve(options.outDir ?? "out/wf2react-preview");
+  if (options.target === "refine" || options.target === "nocobase") {
+    const project = await buildProjectIR(input);
+    if (options.target === "refine") {
+      await generateRefineProject({ outDir, project });
+    } else {
+      await generateNocoBasePlugin({ outDir, project });
+    }
+    console.log(`Converted ${project.pages.length} form(s) to ${options.target} target`);
+    console.log(`Shared components: ${project.components.length} type(s), ${project.components.reduce((n, c) => n + c.instanceCount, 0)} instance(s)`);
+    console.log(`Output: ${outDir}`);
+    return;
+  }
   const result = await convertDesignerSources(input);
   if (options.formEngine === "tanstack") {
     console.error(
@@ -88,6 +104,12 @@ function parseOptions(args: string[]): CliOptions {
       options.format = "json";
     } else if (arg === "--form") {
       options.formEngine = args[++i] as "tanstack";
+    } else if (arg === "--target") {
+      const target = args[++i];
+      if (target !== "compat" && target !== "refine" && target !== "nocobase") {
+        throw new Error(`Unknown target: ${target}`);
+      }
+      options.target = target;
     } else if (!options.input) {
       options.input = arg;
     } else {
@@ -109,10 +131,12 @@ function printHelp() {
 
 Usage:
   wf2react scan <file-or-folder> [--json]
-  wf2react convert <file-or-folder> --out <dir> [--form tanstack]
+  wf2react convert <file-or-folder> --out <dir> [--target compat|refine|nocobase]
   wf2react report <file-or-folder> [--out <dir>]
 
   --form tanstack  [已废弃] 生成 TanStack Form + Zod,而非默认 React 预览。冻结不再维护。
+  --target refine  生成可运行的 Refine/React 验证项目。
+  --target nocobase 生成可放入 NocoBase 2.1 workspace 的 client-v2 插件源码。
 `);
 }
 

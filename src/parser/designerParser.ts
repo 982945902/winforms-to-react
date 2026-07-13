@@ -39,6 +39,7 @@ export type ParseDesignerOptions = {
   resxData?: ResxData;
   controlProps?: Map<string, Array<{ name: string; type: string }>>;
   userControlDefs?: Map<string, VisualControl[]>;
+  inlineUserControls?: boolean;
 };
 
 type MutableControl = VisualControl & {
@@ -278,7 +279,7 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
 
   // Inline UserControl definitions: replace UserControl instances with their
   // parsed child controls, translating coordinates to the parent's space.
-  if (options.userControlDefs) {
+  if (options.userControlDefs && options.inlineUserControls !== false) {
     inlineUserControls(controls, form, options.userControlDefs);
   }
 
@@ -650,6 +651,9 @@ function assignControlProperty(control: MutableControl, property: string, value:
       break;
     case "Image":
       control.appearance.image = String(value ?? "");
+      break;
+    case "Icon":
+      control.appearance.imageKey = enumTail(String(value ?? ""));
       break;
     case "Padding":
       control.appearance.padding = parsePadding(value);
@@ -1636,6 +1640,7 @@ const VISUAL_PROPERTIES = new Set([
   "ImageKey",
   "ImageIndex",
   "Image",
+  "Icon",
   "Padding",
   "Margin",
   "MaximumSize",
@@ -1681,6 +1686,13 @@ function parseColor(value: unknown): VisualColor | undefined {
   }
   const raw = String(value ?? "").trim();
   if (!raw) return undefined;
+
+  const system = raw.match(/(?:System\.Drawing\.)?SystemColors\.([A-Za-z_]\w*)/);
+  if (system) {
+    const name = system[1];
+    const css = knownColorToCss(name);
+    return css ? { cssColor: css, name } : undefined;
+  }
 
   const argb = raw.match(/(?:System\.Drawing\.)?Color\.FromArgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*(\d+)\s*)?\)/);
   if (argb) {

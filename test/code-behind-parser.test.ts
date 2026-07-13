@@ -141,4 +141,65 @@ public partial class C : Form {
     expect(info.handlers).toHaveLength(1);
     expect(info.handlers[0].calledSymbols).toContain("DoWork");
   });
+
+  it("records controls reparented into SplitContainer panels at runtime", () => {
+    const src = `partial class BrowseForm {
+      private void LayoutRevisionInfo() {
+        RevisionInfo.Parent = RevisionsSplitContainer.Panel2;
+        this.RevisionGridContainer.Parent = this.RevisionsSplitContainer.Panel1;
+      }
+    }`;
+    const info = parseCodeBehind(src, "/proj/BrowseForm.cs");
+    expect(info.layoutHints).toEqual([
+      expect.objectContaining({ kind: "reparent", controlName: "RevisionInfo", parentControlName: "RevisionsSplitContainer", panel: 2 }),
+      expect.objectContaining({ kind: "reparent", controlName: "RevisionGridContainer", parentControlName: "RevisionsSplitContainer", panel: 1 }),
+    ]);
+  });
+
+  it("records runtime Image and ImageKey assignments", () => {
+    const info = parseCodeBehind(`partial class F {
+      void Init() {
+        DiffTabPage.ImageKey = nameof(Images.Diff);
+        this.RefreshButton.Image = Properties.Images.ReloadRevisions;
+      }
+    }`, "/proj/F.Init.cs");
+    expect(info.appearanceHints).toEqual([
+      { controlName: "DiffTabPage", property: "imageKey", value: "Diff" },
+      { controlName: "RefreshButton", property: "image", value: "ReloadRevisions" },
+    ]);
+  });
+
+  it("does not mistake runtime image variables for concrete asset keys", () => {
+    const info = parseCodeBehind(`partial class F {
+      void UpdateIcons() {
+        commitButton.Image = image;
+        pullButton.Image = selectedMenuItem.Image;
+        shellButton.Image = shell.Icon;
+        concreteButton.Image = Properties.Images.RepoStateClean;
+      }
+    }`, "/proj/F.Icons.cs");
+    expect(info.appearanceHints).toEqual([
+      { controlName: "concreteButton", property: "image", value: "RepoStateClean" },
+    ]);
+  });
+
+  it("records tab pages created and added at runtime", () => {
+    const info = parseCodeBehind(`partial class F {
+      void FillTerminalTab() {
+        _consoleTabPage = new TabPage { Text = _consoleCaption.Text };
+        CommitInfoTabControl.Controls.Add(_consoleTabPage);
+        _consoleTabPage.ImageKey = nameof(Images.Console);
+      }
+    }`, "/proj/F.Terminal.cs");
+    expect(info.layoutHints).toEqual([
+      expect.objectContaining({
+        kind: "add-tab",
+        controlName: "_consoleTabPage",
+        parentControlName: "CommitInfoTabControl",
+        label: "Console",
+        imageKey: "Console",
+        viewKind: "terminal",
+      }),
+    ]);
+  });
 });

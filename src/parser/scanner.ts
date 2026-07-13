@@ -10,6 +10,13 @@ export type ConvertSourceResult = {
   report: MigrationReport;
 };
 
+export type ConvertSourceOptions = {
+  inlineUserControls?: boolean;
+  baseKindMap?: Map<string, string>;
+  controlProps?: Map<string, Array<{ name: string; type: string }>>;
+  userControlDefs?: Map<string, VisualControl[]>;
+};
+
 export async function findDesignerFiles(inputPath: string): Promise<string[]> {
   const info = await stat(inputPath);
   if (info.isFile()) {
@@ -20,10 +27,14 @@ export async function findDesignerFiles(inputPath: string): Promise<string[]> {
   return files.sort();
 }
 
-export async function convertDesignerSources(inputPath: string): Promise<ConvertSourceResult> {
+export async function convertDesignerSources(inputPath: string, options: ConvertSourceOptions = {}): Promise<ConvertSourceResult> {
   const files = await findDesignerFiles(inputPath);
-  const { baseKindMap, controlProps } = await collectBaseKindMap(inputPath);
-  const userControlDefs = await collectUserControlDefinitions(inputPath);
+  const hierarchy = options.baseKindMap && options.controlProps
+    ? { baseKindMap: options.baseKindMap, controlProps: options.controlProps }
+    : await collectBaseKindMap(inputPath);
+  const { baseKindMap, controlProps } = hierarchy;
+  const userControlDefs = options.userControlDefs
+    ?? await collectUserControlDefinitions(inputPath, baseKindMap);
 
   const forms: VisualForm[] = [];
   const reports: MigrationReport[] = [];
@@ -40,20 +51,30 @@ export async function convertDesignerSources(inputPath: string): Promise<Convert
         // resx parse failure is non-fatal
       }
     }
-    const result = parseDesignerSource(source, { sourcePath: file, baseKindMap, resxData, controlProps, userControlDefs });
-    const codeBehindPath = findCodeBehindForDesigner(file);
-    let cb: CodeBehindInfo = { handlers: [], navigations: [], bindings: [] };
-    if (codeBehindPath) {
+    const result = parseDesignerSource(source, {
+      sourcePath: file,
+      baseKindMap,
+      resxData,
+      controlProps,
+      userControlDefs,
+      inlineUserControls: options.inlineUserControls,
+    });
+    const codeBehindPaths = await findCodeBehindFamily(file);
+    const codeBehindInfos: CodeBehindInfo[] = [];
+    for (const codeBehindPath of codeBehindPaths) {
       try {
         const cbSource = await readFile(codeBehindPath, "utf8");
-        cb = parseCodeBehind(cbSource, codeBehindPath);
+        codeBehindInfos.push(parseCodeBehind(cbSource, codeBehindPath));
       } catch {
         // missing or unreadable code-behind is non-fatal
       }
     }
+    const cb = mergeCodeBehindInfos(codeBehindInfos);
     // Always attach: even without code-behind, every wired event must become a
     // contract point (goal: 100% coverage). Missing hints fall back to unresolved.
     attachMigrationHints(result.form, cb);
+    if (cb.layoutHints.length) result.form.runtimeLayoutHints = cb.layoutHints;
+    applyRuntimeAppearanceHints(result.form, cb);
     if (cb.navigations.length) {
       // Drop false-positive navigations that target a menu/strip component:
       // `contextMenu.Show(point)` shows a popup at a location, not form navigation.
@@ -100,10 +121,40 @@ function findResxForDesigner(designerPath: string): string | null {
   return join(dir, base + ".resx");
 }
 
-function findCodeBehindForDesigner(designerPath: string): string | null {
+async function findCodeBehindFamily(designerPath: string): Promise<string[]> {
   const dir = dirname(designerPath);
   const base = basename(designerPath).replace(/\.Designer\.cs$/i, "");
-  return join(dir, base + ".cs");
+  const entries = await readdir(dir, { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isFile() && (entry.name === `${base}.cs` || entry.name.startsWith(`${base}.`) && entry.name.endsWith(".cs")) && !/\.Designer\.cs$/i.test(entry.name))
+    .map((entry) => join(dir, entry.name))
+    .sort();
+}
+
+function mergeCodeBehindInfos(infos: CodeBehindInfo[]): CodeBehindInfo {
+  const unique = <T>(items: T[], key: (item: T) => string): T[] => [...new Map(items.map((item) => [key(item), item])).values()];
+  return {
+    handlers: unique(infos.flatMap((info) => info.handlers), (item) => `${item.sourceFile}|${item.handler}`),
+    navigations: unique(infos.flatMap((info) => info.navigations), (item) => `${item.target}|${item.modal}|${item.fromHandler ?? ""}`),
+    bindings: unique(infos.flatMap((info) => info.bindings), (item) => `${item.controlName}|${item.boundProperty ?? ""}|${item.kind}|${item.dataSource}`),
+    layoutHints: unique(infos.flatMap((info) => info.layoutHints), (item) => item.kind === "reparent"
+      ? `${item.kind}|${item.controlName}|${item.parentControlName}|${item.panel}`
+      : `${item.kind}|${item.controlName}|${item.parentControlName}|${item.label}`),
+    appearanceHints: unique(infos.flatMap((info) => info.appearanceHints), (item) => `${item.controlName}|${item.property}|${item.value}`),
+  };
+}
+
+function applyRuntimeAppearanceHints(form: VisualForm, cb: CodeBehindInfo): void {
+  const index = new Map<string, VisualControl>();
+  const visit = (controls: VisualControl[]) => controls.forEach((control) => {
+    index.set(control.name, control);
+    visit(control.children);
+  });
+  visit(form.controls);
+  for (const hint of cb.appearanceHints) {
+    const control = index.get(hint.controlName);
+    if (control) control.appearance[hint.property] = hint.value;
+  }
 }
 
 function isAutoGenerated(source: string): boolean {
@@ -113,7 +164,7 @@ function isAutoGenerated(source: string): boolean {
   return false;
 }
 
-async function collectBaseKindMap(inputPath: string): Promise<{ baseKindMap: Map<string, string>; controlProps: Map<string, Array<{ name: string; type: string }>> }> {
+export async function collectBaseKindMap(inputPath: string): Promise<{ baseKindMap: Map<string, string>; controlProps: Map<string, Array<{ name: string; type: string }>> }> {
   const csFiles: string[] = [];
   const info = await stat(inputPath);
   if (info.isDirectory()) {
@@ -158,12 +209,19 @@ async function collectBaseKindMap(inputPath: string): Promise<{ baseKindMap: Map
   return { baseKindMap: map, controlProps };
 }
 
-export async function collectUserControlDefinitions(inputPath: string): Promise<Map<string, VisualControl[]>> {
+export async function collectUserControlDefinitions(
+  inputPath: string,
+  providedBaseKindMap?: Map<string, string>,
+): Promise<Map<string, VisualControl[]>> {
   const csFiles: string[] = [];
   const info = await stat(inputPath);
   if (info.isDirectory()) await walkCs(inputPath, csFiles);
   const designerFiles: string[] = [];
-  await walkDesigner(inputPath, designerFiles);
+  if (info.isDirectory()) {
+    await walkDesigner(inputPath, designerFiles);
+  } else if (inputPath.endsWith(".Designer.cs")) {
+    designerFiles.push(inputPath);
+  }
   const designerMap = new Map<string, string>();
   for (const df of designerFiles) {
     const baseName = basename(df).replace(/\.Designer\.cs$/i, "");
@@ -171,18 +229,22 @@ export async function collectUserControlDefinitions(inputPath: string): Promise<
   }
 
   const defs = new Map<string, VisualControl[]>();
-  // First: scan .cs files for explicit class X : UserControl declarations
+  const baseKindMap = providedBaseKindMap ?? (await collectBaseKindMap(inputPath)).baseKindMap;
+  // First: scan .cs files for direct OR indirect UserControl declarations.
+  // Real projects commonly use chains such as FileStatusList -> GitModuleControl
+  // -> GitExtensionsControl -> TranslatedControl -> UserControl.
   for (const file of csFiles) {
     const source = await readFile(file, "utf8");
-    const classMatch = source.match(/(?:partial\s+)?class\s+([A-Za-z_]\w*)\s*:\s*(?:[\w.]+\.)?UserControl/);
-    if (!classMatch) continue;
-    const className = classMatch[1];
-    const designerPath = designerMap.get(className);
-    if (!designerPath) continue;
-    const designerSource = await readFile(designerPath, "utf8");
-    const miniForm = parseDesignerSource(designerSource, { sourcePath: designerPath });
-    if (miniForm.form.controls.length > 0) {
-      defs.set(className, miniForm.form.controls.map((c) => ({ ...c, typeName: className })));
+    for (const classMatch of source.matchAll(/(?:partial\s+)?class\s+([A-Za-z_]\w*)\s*:\s*([A-Za-z_][\w.]*)/g)) {
+      const className = classMatch[1];
+      if (!inheritsFrom(className, "UserControl", baseKindMap)) continue;
+      const designerPath = designerMap.get(className);
+      if (!designerPath || defs.has(className)) continue;
+      const designerSource = await readFile(designerPath, "utf8");
+      const miniForm = parseDesignerSource(designerSource, { sourcePath: designerPath, baseKindMap });
+      if (miniForm.form.controls.length > 0) {
+        defs.set(className, miniForm.form.controls.map((c) => ({ ...c, typeName: className })));
+      }
     }
   }
   // Second: heuristic for Designer.cs files without explicit base class declaration
@@ -211,6 +273,19 @@ export async function collectUserControlDefinitions(inputPath: string): Promise<
     }
   }
   return defs;
+}
+
+export function inheritsFrom(typeName: string, baseName: string, baseKindMap: Map<string, string>): boolean {
+  let current = typeName;
+  const seen = new Set<string>();
+  while (!seen.has(current)) {
+    if (current === baseName) return true;
+    seen.add(current);
+    const next = baseKindMap.get(current);
+    if (!next) return false;
+    current = next;
+  }
+  return false;
 }
 
 async function walkDesigner(dir: string, files: string[]) {

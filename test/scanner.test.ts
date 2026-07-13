@@ -544,6 +544,52 @@ public partial class MenuForm : Form {
     }
   });
 
+  it("merges same-form partial code-behind files and applies runtime image keys", async () => {
+    const root = await mkdtemp(join(tmpdir(), "wf2react-partials-"));
+    try {
+      await writeFile(join(root, "IconForm.Designer.cs"), `partial class IconForm {
+        private System.Windows.Forms.Button btn;
+        private void InitializeComponent() {
+          this.btn = new System.Windows.Forms.Button();
+          this.ClientSize = new System.Drawing.Size(200, 100);
+          this.Controls.Add(this.btn);
+        }
+      }`, "utf8");
+      await writeFile(join(root, "IconForm.cs"), "partial class IconForm { }", "utf8");
+      await writeFile(join(root, "IconForm.InitIcons.cs"), `partial class IconForm {
+        private void InitIcons() { this.btn.ImageKey = nameof(Images.Save); }
+      }`, "utf8");
+
+      const result = await convertDesignerSources(root);
+      expect(result.forms[0].controls.find((control) => control.name === "btn")?.appearance.imageKey).toBe("Save");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves a concrete Designer image when code-behind assigns an image variable", async () => {
+    const root = await mkdtemp(join(tmpdir(), "wf2react-image-fallback-"));
+    try {
+      await writeFile(join(root, "IconForm.Designer.cs"), `partial class IconForm {
+        private System.Windows.Forms.Button btn;
+        private void InitializeComponent() {
+          this.btn = new System.Windows.Forms.Button();
+          this.btn.Image = Properties.Images.Save;
+          this.ClientSize = new System.Drawing.Size(200, 100);
+          this.Controls.Add(this.btn);
+        }
+      }`, "utf8");
+      await writeFile(join(root, "IconForm.cs"), `partial class IconForm {
+        private void UpdateIcon() { this.btn.Image = image; }
+      }`, "utf8");
+
+      const result = await convertDesignerSources(root);
+      expect(result.forms[0].controls.find((control) => control.name === "btn")?.appearance.image).toBe("Properties.Images.Save");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("degrades gracefully on malformed/truncated/empty designer files", async () => {
     const root = await mkdtemp(join(tmpdir(), "wf2react-bad-"));
     try {
@@ -599,9 +645,6 @@ describe("consolidated integration fixture", () => {
     expect((mainForm?.navigations ?? []).some((n) => n.target === "EditorForm")).toBe(true);
   });
 });
-
-
-
 
 
 

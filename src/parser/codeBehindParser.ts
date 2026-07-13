@@ -4,6 +4,7 @@ import type {
   ContractPoint,
   MigrationHint,
   NavEdge,
+  RuntimeLayoutHint,
   VisualControl,
   VisualForm,
 } from "../ir/types.js";
@@ -13,6 +14,8 @@ export type CodeBehindInfo = {
   handlers: MigrationHint[];
   navigations: NavEdge[];
   bindings: BindingInfo[];
+  layoutHints: RuntimeLayoutHint[];
+  appearanceHints: Array<{ controlName: string; property: "image" | "imageKey"; value: string }>;
 };
 
 const CS_KEYWORDS = new Set([
@@ -64,6 +67,10 @@ const DATABINDINGS_RE =
 const DATABINDINGS_NEW_RE =
   /([A-Za-z_]\w*)\s*\.\s*DataBindings\s*\.\s*Add\s*\(\s*new\s+Binding\s*\(\s*"([^"]*)"\s*,\s*(?:this\.)?([A-Za-z_][\w.]*)\s*(?:,\s*"([^"]*)")?/g;
 const CS_EXPR_KEYWORDS = new Set(["typeof", "new", "null", "nameof", "sizeof", "default"]);
+const PANEL_PARENT_RE = /(?:this\.)?([A-Za-z_]\w*)\s*\.\s*Parent\s*=\s*(?:this\.)?([A-Za-z_]\w*)\s*\.\s*Panel([12])\b/g;
+const RUNTIME_IMAGE_RE = /(?:this\.)?([A-Za-z_]\w*)\s*\.\s*(ImageKey|Image)\s*=\s*([^;]+);/g;
+const NEW_TABPAGE_RE = /(?:this\.)?([A-Za-z_]\w*)\s*=\s*new\s+TabPage\b/g;
+const ADD_TABPAGE_RE = /(?:this\.)?([A-Za-z_]\w*)\s*\.\s*(?:Controls|TabPages)\s*\.\s*Add\s*\(\s*(?:this\.)?([A-Za-z_]\w*)\s*\)/g;
 
 function lineOf(source: string, index: number): number {
   let line = 1;
@@ -71,6 +78,11 @@ function lineOf(source: string, index: number): number {
     if (source[i] === "\n") line += 1;
   }
   return line;
+}
+
+function labelFromRuntimeTabName(name: string): string {
+  const value = name.replace(/^_+/, "").replace(/TabPage$/i, "").replace(/([a-z0-9])([A-Z])/g, "$1 $2").trim();
+  return value ? value[0].toUpperCase() + value.slice(1) : "Runtime tab";
 }
 
 // Find the method body `{...}` starting at/after `fromIndex`; return [bodyStart, bodyEnd, endLine].
@@ -203,7 +215,75 @@ export function parseCodeBehind(source: string, sourcePath: string): CodeBehindI
     }
   }
 
-  return { handlers, navigations, bindings };
+  const layoutHints: RuntimeLayoutHint[] = [];
+  const seenLayoutHint = new Set<string>();
+  PANEL_PARENT_RE.lastIndex = 0;
+  while ((m = PANEL_PARENT_RE.exec(clean)) !== null) {
+    const key = `${m[1]}|${m[2]}|${m[3]}`;
+    if (seenLayoutHint.has(key)) continue;
+    seenLayoutHint.add(key);
+    layoutHints.push({
+      kind: "reparent",
+      controlName: m[1],
+      parentControlName: m[2],
+      panel: Number(m[3]) as 1 | 2,
+      sourceFile: file,
+      line: lineOf(clean, m.index),
+    });
+  }
+
+  const runtimeTabs = new Map<string, { index: number }>();
+  NEW_TABPAGE_RE.lastIndex = 0;
+  while ((m = NEW_TABPAGE_RE.exec(clean)) !== null) runtimeTabs.set(m[1], { index: m.index });
+  ADD_TABPAGE_RE.lastIndex = 0;
+  while ((m = ADD_TABPAGE_RE.exec(clean)) !== null) {
+    const created = runtimeTabs.get(m[2]);
+    if (!created) continue;
+    const key = `tab|${m[2]}|${m[1]}`;
+    if (seenLayoutHint.has(key)) continue;
+    seenLayoutHint.add(key);
+    const label = labelFromRuntimeTabName(m[2]);
+    layoutHints.push({
+      kind: "add-tab",
+      controlName: m[2],
+      parentControlName: m[1],
+      label,
+      viewKind: /(?:console|terminal|shell)/i.test(`${m[2]} ${label}`) ? "terminal" : "placeholder",
+      sourceFile: file,
+      line: lineOf(clean, created.index),
+    });
+  }
+
+  const appearanceHints: CodeBehindInfo["appearanceHints"] = [];
+  const seenAppearanceHint = new Set<string>();
+  RUNTIME_IMAGE_RE.lastIndex = 0;
+  while ((m = RUNTIME_IMAGE_RE.exec(clean)) !== null) {
+    const rhs = m[3].trim();
+    const quoted = rhs.match(/^"([^"]+)"$/)?.[1];
+    const member = rhs.match(/([A-Za-z_]\w*)\s*\)?\s*$/)?.[1];
+    const value = quoted ?? member;
+    if (!value || value === "null") continue;
+    const property = m[2] === "ImageKey" ? "imageKey" : "image";
+    const resourceExpression = /(?:^|\.)(?:Images|Resources)\s*\./.test(rhs);
+    const namedExpression = /^nameof\s*\(/.test(rhs);
+    const concrete = Boolean(quoted || resourceExpression || namedExpression || property === "imageKey" && !/^(?:image|icon)$/i.test(value));
+    // `button.Image = image`, `selectedItem.Image` and `shell.Icon` describe a
+    // runtime dependency, not an asset key. Treating their final member name as
+    // an image would overwrite a concrete Designer fallback with "Image"/"Icon".
+    if (!concrete) continue;
+    const key = `${m[1]}|${property}|${value}`;
+    if (seenAppearanceHint.has(key)) continue;
+    seenAppearanceHint.add(key);
+    appearanceHints.push({ controlName: m[1], property, value });
+  }
+
+  for (const hint of layoutHints) {
+    if (hint.kind !== "add-tab") continue;
+    const image = appearanceHints.find((item) => item.controlName === hint.controlName && item.property === "imageKey");
+    if (image) hint.imageKey = image.value;
+  }
+
+  return { handlers, navigations, bindings, layoutHints, appearanceHints };
 }
 
 // Walk the form's control tree, attach migration hints to matching events,

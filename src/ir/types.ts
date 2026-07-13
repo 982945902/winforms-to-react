@@ -189,8 +189,80 @@ export type VisualControl = {
   treeNodeChildren?: Record<string, string[]>; // Parent node name -> child node names
   items?: string[];
   customProperties?: Array<{ name: string; type: string }>;
+  // Reference to a shared custom/UserControl definition in ProjectIR.
+  // Compatibility conversion may still inline controls, but target exporters
+  // preserve this reference so one component type is mapped exactly once.
+  componentRef?: string;
   children: VisualControl[];
 };
+
+export type NormalizedLayoutRole = "content" | "toolbar" | "actions" | "status";
+
+// Target-neutral layout semantics derived from WinForms container metadata.
+// Nodes reference controls by name so component definitions remain shared and
+// target generators do not need to duplicate or rewrite the control tree.
+export type NormalizedLayoutNode = {
+  id: string;
+  kind: "control" | "split" | "stack" | "grid" | "tabs" | "layers" | "frame" | "empty";
+  role?: NormalizedLayoutRole;
+  controlName?: string;
+  label?: string;
+  axis?: "horizontal" | "vertical";
+  ratio?: number;
+  children?: NormalizedLayoutNode[];
+  alternatives?: string[];
+  columns?: string[];
+  rows?: string[];
+  selectedIndex?: number;
+  runtimeTabs?: Array<{
+    id: string;
+    label: string;
+    imageKey?: string;
+    viewKind: "terminal" | "placeholder";
+  }>;
+  cells?: Array<{
+    column: number;
+    row: number;
+    columnSpan?: number;
+    rowSpan?: number;
+    node: NormalizedLayoutNode;
+  }>;
+};
+
+export type NormalizedLayoutPlan = {
+  version: 1;
+  strategy: "semantic-web";
+  sourceSize?: VisualSize;
+  root: NormalizedLayoutNode;
+  diagnostics: {
+    stateAlternatives: number;
+    excludedPopups: string[];
+    runtimeReparents?: Array<{ controlName: string; target: string }>;
+    runtimeTabs?: Array<{ controlName: string; target: string; label: string }>;
+  };
+};
+
+export type RuntimeReparentHint = {
+  kind: "reparent";
+  controlName: string;
+  parentControlName: string;
+  panel: 1 | 2;
+  sourceFile: string;
+  line: number;
+};
+
+export type RuntimeTabHint = {
+  kind: "add-tab";
+  controlName: string;
+  parentControlName: string;
+  label: string;
+  imageKey?: string;
+  viewKind: "terminal" | "placeholder";
+  sourceFile: string;
+  line: number;
+};
+
+export type RuntimeLayoutHint = RuntimeReparentHint | RuntimeTabHint;
 
 export type EventStub = {
   controlName: string;
@@ -237,6 +309,8 @@ export type FormReportSummary = {
 export type VisualForm = {
   kind: "Form";
   name: string;
+  baseType?: string;
+  baseTypes?: string[];
   sourcePath: string;
   support: FormSupportSummary;
   text?: string;
@@ -254,10 +328,12 @@ export type VisualForm = {
   minimizeBox?: boolean;
   controlBox?: boolean;
   controls: VisualControl[];
+  layout?: NormalizedLayoutPlan;
   properties: Record<string, unknown>;
   events?: VisualEvent[];
   navigations?: NavEdge[];
   bindings?: BindingInfo[];
+  runtimeLayoutHints?: RuntimeLayoutHint[];
 };
 
 export type MigrationReport = {
@@ -275,5 +351,33 @@ export type MigrationReport = {
 export type ParseResult = {
   form: VisualForm;
   controlsByName: Map<string, VisualControl>;
+  report: MigrationReport;
+};
+
+export type ComponentDefinition = {
+  id: string;
+  typeName: string;
+  sourcePath?: string;
+  status: "resolved" | "external";
+  controls: VisualControl[];
+  layout?: NormalizedLayoutPlan;
+  instanceCount: number;
+  support?: FormSupportSummary;
+  bindings?: BindingInfo[];
+};
+
+export type ProjectAsset = {
+  key: string;
+  sourcePath?: string;
+  contentBase64?: string;
+  targetFileName: string;
+};
+
+export type ProjectIR = {
+  schemaVersion: 1;
+  sourceRoot: string;
+  pages: VisualForm[];
+  components: ComponentDefinition[];
+  assets: ProjectAsset[];
   report: MigrationReport;
 };

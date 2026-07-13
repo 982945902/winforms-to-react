@@ -37,6 +37,17 @@ Generate a **compat preview** (static visual):
 node dist/cli.js convert /path/to/winforms-source --out /tmp/preview
 ```
 
+Generate platform comparison targets from the same neutral Project IR:
+
+```bash
+node dist/cli.js convert /path/to/winforms-source --target refine --out /tmp/refine
+node dist/cli.js convert /path/to/winforms-source --target nocobase --out /tmp/nocobase-plugin
+```
+
+The Refine target is standalone. The NocoBase target is a `client-v2` plugin source package intended for a
+NocoBase 2.1 workspace. See [the pinned GitExtensions platform spike](docs/platform-spike.md) for the current
+validation scope and results.
+
 Generate a **TanStack Form** project (runnable forms):
 
 ```bash
@@ -79,6 +90,10 @@ The parser currently extracts:
 - layout metadata: `TableLayoutPanel` row/column styles and cell coordinates,
   `FlowLayoutPanel` `FlowDirection`/`WrapContents`, `SplitContainer`
   `Panel1`/`Panel2` grouping, `Orientation`, `SplitterDistance`
+- a target-neutral semantic layout plan (`split`, `grid`, `stack`, `layers`)
+  that turns container metadata into responsive web regions and records
+  overlapping WinForms state controls as alternatives instead of rendering
+  them simultaneously
 - control hierarchy from `Controls.Add`
 - menu/tool/status strip hierarchy from `Items.AddRange` and `DropDownItems.AddRange`
 - `DataGridView` column definitions from `Columns.AddRange` and nested style

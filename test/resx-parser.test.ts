@@ -2,7 +2,7 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseResx, applyResxToProps } from "../src/parser/resxParser.js";
+import { parseResx, parseResxBinaryResources, applyResxToProps } from "../src/parser/resxParser.js";
 
 const SAMPLE_RESX = `<?xml version="1.0" encoding="utf-8"?>
 <root>
@@ -106,6 +106,25 @@ describe("resxParser", () => {
       const data = await parseResx(file);
       const props = applyResxToProps("lbl", data);
       expect(props.font).toEqual({ family: "Segoe UI", size: 9.75, bold: true, italic: true });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("extracts embedded WinForms icon bytes without System.Drawing", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "wf2react-resx-icon-"));
+    try {
+      const file = join(dir, "F.resx");
+      await writeFile(file, `<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <!-- <data name="Example.Icon" type="System.Drawing.Icon, System.Drawing"><value>QUJD</value></data> -->
+  <data name="$this.Icon" type="System.Drawing.Icon, System.Drawing" mimetype="application/x-microsoft.net.object.bytearray.base64">
+    <value>AAAB\nAA==</value>
+  </data>
+</root>`, "utf8");
+      const resources = await parseResxBinaryResources(file);
+      expect(resources.size).toBe(1);
+      expect(resources.get("$this.Icon")).toEqual(expect.objectContaining({ contentBase64: "AAABAA==" }));
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

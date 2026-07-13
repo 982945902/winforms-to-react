@@ -6,6 +6,12 @@ export type ResxControlProps = Map<string, string>;
 // Map from control name -> properties
 export type ResxData = Map<string, ResxControlProps>;
 
+export type ResxBinaryResource = {
+  name: string;
+  type: string;
+  contentBase64: string;
+};
+
 // Decode the XML entities that resx <value> text is stored with, so displayed
 // text (labels/tooltips containing & < > " ') round-trips correctly.
 function decodeXmlEntities(s: string): string {
@@ -49,6 +55,27 @@ export async function parseResx(filePath: string): Promise<ResxData> {
   }
 
   return data;
+}
+
+// Extract raw icon byte arrays embedded by ComponentResourceManager. Icon
+// values in classic WinForms resx files are already ICO bytes encoded as
+// base64, so they can be emitted without System.Drawing or platform-specific
+// deserialization.
+export async function parseResxBinaryResources(filePath: string): Promise<Map<string, ResxBinaryResource>> {
+  const source = (await readFile(filePath, "utf8")).replace(/<!--[\s\S]*?-->/g, "");
+  const resources = new Map<string, ResxBinaryResource>();
+  const pattern = /<data\s+([^>]*)>\s*<value(?:[^>]*)>([\s\S]*?)<\/value>\s*<\/data>/g;
+  for (const match of source.matchAll(pattern)) {
+    const attributes = match[1];
+    const name = attributes.match(/\bname="([^"]+)"/)?.[1];
+    const type = attributes.match(/\btype="([^"]+)"/)?.[1] ?? "";
+    if (!name || !/System\.Drawing\.Icon/i.test(type)) continue;
+    const contentBase64 = match[2].replace(/\s+/g, "");
+    if (!contentBase64 || !/^[A-Za-z0-9+/]+={0,2}$/.test(contentBase64)) continue;
+    const decodedName = decodeXmlEntities(name);
+    resources.set(decodedName, { name: decodedName, type, contentBase64 });
+  }
+  return resources;
 }
 
 // Merge resx properties into a control's bounds and text.

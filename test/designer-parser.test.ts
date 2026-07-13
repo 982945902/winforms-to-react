@@ -497,12 +497,15 @@ partial class VisualForm
         this.label1.Size = new System.Drawing.Size(120, 24);
         this.label1.Text = "Hello";
         this.button1.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+        this.button1.Icon = OpenDental.UI.EnumIcons.DeleteX;
         this.button1.Location = new System.Drawing.Point(8, 40);
         this.button1.Size = new System.Drawing.Size(80, 28);
         this.button1.Text = "OK";
         this.textBox1.Location = new System.Drawing.Point(8, 76);
         this.textBox1.Size = new System.Drawing.Size(160, 20);
+        this.textBox1.BackColor = System.Drawing.SystemColors.Window;
         this.panel1.Dock = System.Windows.Forms.DockStyle.Fill;
+        this.panel1.BackColor = System.Drawing.SystemColors.Control;
         this.panel1.Padding = new System.Windows.Forms.Padding(4, 8, 4, 8);
         this.panel1.Location = new System.Drawing.Point(0, 100);
         this.panel1.Size = new System.Drawing.Size(200, 60);
@@ -538,10 +541,13 @@ describe("parseDesignerSource visual properties", () => {
 
     const button = result.controlsByName.get("button1");
     expect(button?.appearance.flatStyle).toBe("Flat");
+    expect(button?.appearance.imageKey).toBe("DeleteX");
 
     const panel = result.controlsByName.get("panel1");
     expect(panel?.dock).toBe("Fill");
+    expect(panel?.appearance.backColor).toEqual({ cssColor: "#f0f0f0", name: "Control" });
     expect(panel?.appearance.padding).toEqual({ left: 4, top: 8, right: 4, bottom: 8 });
+    expect(result.controlsByName.get("textBox1")?.appearance.backColor).toEqual({ cssColor: "#ffffff", name: "Window" });
   });
 });
 
