@@ -106,7 +106,10 @@ function normalizeContent(
 
   const primary = [...controls].sort((a, b) => primaryScore(b, context) - primaryScore(a, context))[0];
   const others = controls.filter((control) => control !== primary);
-  if (others.every((control) => overlaps(control, primary) || area(control) < Math.max(area(primary) * 0.12, 1200))) {
+  // State alternatives must occupy the same visual region. Treating every
+  // small sibling as an overlay hides ordinary label/input pairs in compact
+  // UserControls (for example a 13px label above a 21px combo box).
+  if (others.every((control) => overlaps(control, primary))) {
     context.stateAlternatives += others.length;
     return node(context, "layers", {
       role,

@@ -1,5 +1,5 @@
 import { readdir, stat } from "node:fs/promises";
-import { basename, extname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import type {
   ControlCoverageByKind,
   ComponentDefinition,
@@ -15,26 +15,44 @@ import {
   inheritsFrom,
 } from "../parser/scanner.js";
 import { normalizeLayout } from "./layoutNormalizer.js";
-import { parseResxBinaryResources } from "../parser/resxParser.js";
+import { applyResxToProps, parseResx, parseResxBinaryResources } from "../parser/resxParser.js";
+import { materializeRuntimeItems } from "../parser/enumCatalog.js";
+import { materializePropertyGridPreviews } from "../parser/propertyGridCatalog.js";
+import { materializeRuntimeValueDefaults } from "../parser/runtimeValueCatalog.js";
+import { materializeTabPageAssets } from "../parser/tabPageAssetCatalog.js";
+import { materializeComponentPropertyBindings } from "../parser/componentPropertyBindingCatalog.js";
+import { materializeComponentInitializationDefaults } from "../parser/componentInitializationCatalog.js";
 
-export async function buildProjectIR(inputPath: string): Promise<ProjectIR> {
+export type BuildProjectIROptions = {
+  /** Wider source tree used to resolve inheritance, shared controls, assets, and runtime data types. */
+  contextRoot?: string;
+};
+
+export async function buildProjectIR(inputPath: string, options: BuildProjectIROptions = {}): Promise<ProjectIR> {
   const sourceRoot = resolve(inputPath);
-  const hierarchy = await collectBaseKindMap(sourceRoot);
-  const definitions = await collectUserControlDefinitions(sourceRoot, hierarchy.baseKindMap);
-  const [converted, designerFiles] = await Promise.all([
+  const sourceInfo = await stat(sourceRoot);
+  const contextRoot = resolve(options.contextRoot ?? (sourceInfo.isFile() ? dirname(sourceRoot) : sourceRoot));
+  // A representative single-form conversion must still see the project's
+  // inheritance graph and shared UserControl definitions. Only the selected
+  // source is emitted as a page; context is resolution input, not conversion
+  // scope.
+  const hierarchy = await collectBaseKindMap(contextRoot);
+  const definitions = await collectUserControlDefinitions(contextRoot, hierarchy.baseKindMap);
+  const [converted, contextDesignerFiles] = await Promise.all([
     convertDesignerSources(sourceRoot, {
       inlineUserControls: false,
       baseKindMap: hierarchy.baseKindMap,
       controlProps: hierarchy.controlProps,
       userControlDefs: definitions,
     }),
-    findDesignerFiles(sourceRoot),
+    findDesignerFiles(contextRoot),
   ]);
 
   const sourceByType = new Map<string, string>();
-  for (const file of designerFiles) {
+  for (const file of contextDesignerFiles) {
     sourceByType.set(basename(file).replace(/\.Designer\.cs$/i, ""), file);
   }
+  const definitionClientSizes = await collectDesignerClientSizes(contextDesignerFiles);
 
   const pages = converted.forms.filter((form) =>
     inheritsFrom(form.name, "Form", hierarchy.baseKindMap) || !definitions.has(form.name),
@@ -75,6 +93,7 @@ export async function buildProjectIR(inputPath: string): Promise<ProjectIR> {
         typeName,
         sourcePath: parsedDefinitionByType.get(typeName)?.sourcePath ?? sourceByType.get(typeName),
         status: definitions.has(typeName) ? "resolved" : "external",
+        ...(definitionClientSizes.get(typeName) ? { clientSize: definitionClientSizes.get(typeName) } : {}),
         controls,
         instanceCount: usage.get(typeName) ?? 0,
         support: parsedDefinitionByType.get(typeName)?.support,
@@ -82,15 +101,35 @@ export async function buildProjectIR(inputPath: string): Promise<ProjectIR> {
       };
     });
 
+  await materializeComponentPropertyBindings(components, contextRoot);
+  await materializeComponentInitializationDefaults(components, contextRoot);
+
+  await materializeRuntimeItems([
+    ...pages.flatMap((page) => page.controls),
+    ...components.flatMap((component) => component.controls),
+  ], contextRoot);
+  await materializeRuntimeValueDefaults([
+    ...pages.flatMap((page) => page.controls),
+    ...components.flatMap((component) => component.controls),
+  ], contextRoot);
+  await materializePropertyGridPreviews([
+    ...pages.flatMap((page) => page.controls),
+    ...components.flatMap((component) => component.controls),
+  ], contextRoot);
+  await materializeTabPageAssets([
+    ...pages.flatMap((page) => page.controls),
+    ...components.flatMap((component) => component.controls),
+  ], contextRoot);
+
   const resolvedComponents = new Set(components.filter((component) => component.status === "resolved").map((component) => component.id));
   for (const page of pages) {
     page.layout = normalizeLayout(page.controls, page.clientSize, resolvedComponents, page.runtimeLayoutHints);
   }
   for (const component of components) {
-    component.layout = normalizeLayout(component.controls, inferSize(component.controls), resolvedComponents);
+    component.layout = normalizeLayout(component.controls, component.clientSize ?? inferSize(component.controls), resolvedComponents);
   }
   const [visualAssets, formAssets] = await Promise.all([
-    collectVisualAssets(sourceRoot, [
+    collectVisualAssets(contextRoot, [
       ...pages.flatMap((page) => page.controls),
       ...components.flatMap((component) => component.controls),
     ], adapterAssetKeys(components)),
@@ -106,6 +145,21 @@ export async function buildProjectIR(inputPath: string): Promise<ProjectIR> {
     assets,
     report: reportForPages(pages, converted.report),
   };
+}
+
+async function collectDesignerClientSizes(files: string[]): Promise<Map<string, { width: number; height: number }>> {
+  const result = new Map<string, { width: number; height: number }>();
+  await Promise.all(files.map(async (file) => {
+    try {
+      const resx = await parseResx(file.replace(/\.Designer\.cs$/i, ".resx"));
+      const size = applyResxToProps("$this", resx).size;
+      if (size) result.set(basename(file).replace(/\.Designer\.cs$/i, ""), size);
+    } catch {
+      // Non-localized controls commonly declare their size directly. Their
+      // child-bounds inference remains the fallback below.
+    }
+  }));
+  return result;
 }
 
 function collectBaseTypes(typeName: string, baseKindMap: Map<string, string>): string[] {
@@ -179,6 +233,8 @@ async function collectVisualAssets(
   if (keys.size === 0) return [];
 
   const candidates = new Map<string, string>();
+  const canonicalCandidates = new Map<string, string>();
+  const canonicalAssetKey = (value: string): string => value.toLowerCase().replace(/[-_\s]+/g, "");
   const skip = new Set([".git", "node_modules", "bin", "obj", "dist", ".next"]);
   const walk = async (path: string): Promise<void> => {
     const info = await stat(path);
@@ -187,9 +243,11 @@ async function collectVisualAssets(
       if (![".png", ".svg", ".ico", ".jpg", ".jpeg", ".gif"].includes(extension)) return;
       const key = basename(path, extension).toLowerCase();
       if (!candidates.has(key)) candidates.set(key, path);
+      const canonical = canonicalAssetKey(key);
+      if (!canonicalCandidates.has(canonical)) canonicalCandidates.set(canonical, path);
       return;
     }
-    const entries = await readdir(path, { withFileTypes: true });
+    const entries = (await readdir(path, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name));
     await Promise.all(entries
       .filter((entry) => !entry.isDirectory() || !skip.has(entry.name))
       .map((entry) => walk(join(path, entry.name))));
@@ -197,7 +255,7 @@ async function collectVisualAssets(
   await walk(sourceRoot);
 
   return [...keys].sort().flatMap((key) => {
-    const sourcePath = candidates.get(key.toLowerCase());
+    const sourcePath = candidates.get(key.toLowerCase()) ?? canonicalCandidates.get(canonicalAssetKey(key));
     if (!sourcePath) return [];
     return [{ key, sourcePath, targetFileName: `${key}${extname(sourcePath).toLowerCase()}` }];
   });

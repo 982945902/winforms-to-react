@@ -25,11 +25,32 @@ const SAMPLE_RESX = `<?xml version="1.0" encoding="utf-8"?>
   <data name="btnOK.Anchor" type="System.Windows.Forms.AnchorStyles, System.Windows.Forms">
     <value>Bottom, Right</value>
   </data>
+  <data name="btnOK.Padding" type="System.Windows.Forms.Padding, System.Windows.Forms"><value>1, 2, 3, 4</value></data>
+  <data name="btnOK.Margin" type="System.Windows.Forms.Padding, System.Windows.Forms"><value>5, 6, 7, 8</value></data>
+  <data name="btnOK.BackColor" type="System.Drawing.Color, System.Drawing"><value>Window</value></data>
+  <data name="btnOK.ForeColor" type="System.Drawing.Color, System.Drawing"><value>Navy</value></data>
+  <data name="btnOK.BorderStyle" type="System.Windows.Forms.BorderStyle, System.Windows.Forms"><value>FixedSingle</value></data>
+  <data name="btnOK.TextAlign" type="System.Drawing.ContentAlignment, System.Drawing"><value>MiddleLeft</value></data>
+  <data name="btnOK.RightToLeft" type="System.Windows.Forms.RightToLeft, System.Windows.Forms"><value>Yes</value></data>
+  <data name="btnOK.MinimumSize" type="System.Drawing.Size, System.Drawing"><value>70, 20</value></data>
+  <data name="btnOK.MaximumSize" type="System.Drawing.Size, System.Drawing"><value>100, 30</value></data>
+  <data name="txtNotes.ReadOnly" type="System.Boolean, mscorlib"><value>True</value></data>
+  <data name="txtNotes.Multiline" type="System.Boolean, mscorlib"><value>True</value></data>
+  <data name="txtNotes.WordWrap" type="System.Boolean, mscorlib"><value>False</value></data>
+  <data name="txtNotes.MaxLength" type="System.Int32, mscorlib"><value>80</value></data>
+  <data name="txtNotes.PlaceholderText" xml:space="preserve"><value>Describe the change</value></data>
+  <data name="txtNotes.ScrollBars" type="System.Windows.Forms.ScrollBars, System.Windows.Forms"><value>Vertical</value></data>
+  <data name="txtSecret.UseSystemPasswordChar" type="System.Boolean, mscorlib"><value>True</value></data>
+  <data name="comboMode.DropDownStyle" type="System.Windows.Forms.ComboBoxStyle, System.Windows.Forms"><value>DropDownList</value></data>
   <data name="lblName.Location" type="System.Drawing.Point, System.Drawing">
     <value>12, 12</value>
   </data>
   <data name="lblName.Text" xml:space="preserve">
     <value>Name:</value>
+  </data>
+  <data name="tpService.Text" xml:space="preserve">
+    <value>Image service</value>
+    <comment>@Invariant</comment>
   </data>
   <data name="lvItems.Font" type="System.Drawing.Font, System.Drawing">
     <value>Microsoft Sans Serif, 9.75pt</value>
@@ -56,11 +77,34 @@ describe("resxParser", () => {
       expect(btnProps.size).toEqual({ width: 75, height: 23 });
       expect(btnProps.text).toBe("OK");
       expect(btnProps.anchor).toEqual(["Bottom", "Right"]);
+      expect(btnProps.padding).toEqual({ left: 1, top: 2, right: 3, bottom: 4 });
+      expect(btnProps.margin).toEqual({ left: 5, top: 6, right: 7, bottom: 8 });
+      expect(btnProps.backColor).toBe("Window");
+      expect(btnProps.foreColor).toBe("Navy");
+      expect(btnProps.borderStyle).toBe("FixedSingle");
+      expect(btnProps.textAlign).toBe("MiddleLeft");
+      expect(btnProps.rightToLeft).toBe("Yes");
+      expect(btnProps.minimumSize).toEqual({ width: 70, height: 20 });
+      expect(btnProps.maximumSize).toEqual({ width: 100, height: 30 });
+
+      expect(applyResxToProps("txtNotes", data)).toEqual(expect.objectContaining({
+        readOnly: true,
+        multiline: true,
+        wordWrap: false,
+        maxLength: 80,
+        placeholderText: "Describe the change",
+        scrollBars: "Vertical",
+      }));
+      expect(applyResxToProps("txtSecret", data).useSystemPasswordChar).toBe(true);
+      expect(applyResxToProps("comboMode", data).dropDownStyle).toBe("DropDownList");
 
       // Label text
       const lblProps = applyResxToProps("lblName", data);
       expect(lblProps.text).toBe("Name:");
       expect(lblProps.location).toEqual({ x: 12, y: 12 });
+
+      // A comment after <value> is common in localized Designer resources.
+      expect(applyResxToProps("tpService", data).text).toBe("Image service");
 
       // Form properties ($this)
       const formProps = applyResxToProps("$this", data);

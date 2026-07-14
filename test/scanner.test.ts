@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { buildProjectIR } from "../src/ir/projectIr.js";
 import { convertDesignerSources } from "../src/parser/scanner.js";
 
 const FIRST_FORM = `
@@ -36,6 +37,22 @@ partial class SecondForm
 `;
 
 describe("convertDesignerSources", () => {
+  it("retains the form base type when converting a single Designer file", async () => {
+    const root = await mkdtemp(join(tmpdir(), "wf2react-single-inherit-"));
+    try {
+      const designer = join(root, "FirstForm.Designer.cs");
+      await writeFile(designer, FIRST_FORM, "utf8");
+      await writeFile(join(root, "FirstForm.cs"), "partial class FirstForm : ProductFormBase { }", "utf8");
+
+      const project = await buildProjectIR(designer);
+
+      expect(project.pages[0].baseType).toBe("ProductFormBase");
+      expect(project.pages[0].baseTypes).toEqual(["ProductFormBase"]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("merges per-form report summaries across Designer files", async () => {
     const root = await mkdtemp(join(tmpdir(), "wf2react-scan-"));
     const nested = join(root, "nested");
@@ -328,6 +345,89 @@ public partial class Tabby : Form {
       // Events on controls inside AddRange-added pages must reach contract points.
       const keys = form.support.contractPoints.map((c) => `${c.controlName}.${c.event}`).sort();
       expect(keys).toEqual(["btnA.Click", "chkB.CheckedChanged"]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps only tab-navigator bindings whose controls exist in the form", async () => {
+    const root = await mkdtemp(join(tmpdir(), "wf2react-tab-nav-"));
+    try {
+      await writeFile(join(root, "Settings.Designer.cs"), `partial class Settings {
+        private Helpers.TabToTreeView settingsTree;
+        private System.Windows.Forms.TabControl settingsTabs;
+        private System.Windows.Forms.TabPage generalPage;
+        private void InitializeComponent() {
+          this.settingsTree = new Helpers.TabToTreeView();
+          this.settingsTabs = new System.Windows.Forms.TabControl();
+          this.generalPage = new System.Windows.Forms.TabPage();
+          this.generalPage.Text = "General";
+          this.settingsTabs.Controls.Add(this.generalPage);
+          this.Controls.Add(this.settingsTabs);
+          this.Controls.Add(this.settingsTree);
+        }
+      }`, "utf8");
+      await writeFile(join(root, "Settings.cs"), `partial class Settings : System.Windows.Forms.Form {
+        void ConfigureNavigation() {
+          settingsTree.MainTabControl = settingsTabs;
+          missingTree.MainTabControl = settingsTabs;
+        }
+      }`, "utf8");
+
+      const result = await convertDesignerSources(root);
+      expect(result.forms[0].runtimeTabNavigators).toEqual([expect.objectContaining({
+        navigatorControlName: "settingsTree",
+        property: "MainTabControl",
+        tabControlName: "settingsTabs",
+      })]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps direct control-state bindings only when their handler is wired", async () => {
+    const root = await mkdtemp(join(tmpdir(), "wf2react-control-state-"));
+    try {
+      await writeFile(join(root, "Settings.Designer.cs"), `partial class Settings {
+        private System.Windows.Forms.CheckBox includeDetails;
+        private System.Windows.Forms.TextBox details;
+        private System.Windows.Forms.TextBox notes;
+        private void InitializeComponent() {
+          this.includeDetails = new System.Windows.Forms.CheckBox();
+          this.details = new System.Windows.Forms.TextBox();
+          this.notes = new System.Windows.Forms.TextBox();
+          this.includeDetails.CheckedChanged += includeDetails_CheckedChanged;
+          this.Controls.Add(this.includeDetails);
+          this.Controls.Add(this.details);
+          this.Controls.Add(this.notes);
+        }
+      }`, "utf8");
+      await writeFile(join(root, "Settings.cs"), `partial class Settings : System.Windows.Forms.Form {
+        void includeDetails_CheckedChanged(object sender, System.EventArgs e) {
+          details.Enabled = includeDetails.Checked;
+          notes.ReadOnly = !includeDetails.Checked;
+          missing.Enabled = includeDetails.Checked;
+        }
+        void NeverCalled() { details.Visible = includeDetails.Checked; }
+      }`, "utf8");
+
+      const result = await convertDesignerSources(root);
+      expect(result.forms[0].runtimeControlBindings).toEqual([
+        expect.objectContaining({
+          triggerControlName: "includeDetails",
+          triggerEvent: "CheckedChanged",
+          handler: "includeDetails_CheckedChanged",
+          sourceControlName: "includeDetails",
+          targetControlName: "details",
+          targetProperty: "enabled",
+        }),
+        expect.objectContaining({
+          sourceControlName: "includeDetails",
+          targetControlName: "notes",
+          targetProperty: "readOnly",
+          negated: true,
+        }),
+      ]);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -645,9 +745,6 @@ describe("consolidated integration fixture", () => {
     expect((mainForm?.navigations ?? []).some((n) => n.target === "EditorForm")).toBe(true);
   });
 });
-
-
-
 
 
 

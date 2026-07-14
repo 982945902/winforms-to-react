@@ -50,6 +50,7 @@ partial class OrderForm
         //
         this.txtCode.Location = new System.Drawing.Point(64, 23);
         this.txtCode.Name = "txtCode";
+        this.txtCode.PlaceholderText = "Enter order code";
         this.txtCode.Size = new System.Drawing.Size(170, 20);
         this.txtCode.TabIndex = 1;
         //
@@ -113,6 +114,8 @@ describe("parseDesignerSource", () => {
       "gridItems",
       "groupBox1"
     ]);
+    // WinForms collection index zero is the front of the z-order. Preserve the
+    // Designer Controls.Add sequence so the absolute renderer can reproduce it.
 
     const group = result.controlsByName.get("groupBox1");
     expect(group).toMatchObject({
@@ -126,9 +129,11 @@ describe("parseDesignerSource", () => {
       "txtCode",
       "btnSave"
     ]);
+    expect(result.controlsByName.get("txtCode")?.appearance.placeholderText).toBe("Enter order code");
 
     const button = result.controlsByName.get("btnSave");
     expect(button?.events).toEqual([{ event: "Click", handler: "btnSave_Click" }]);
+    expect(button?.sourceType).toBe("System.Windows.Forms.Button");
 
     const grid = result.controlsByName.get("gridItems");
     expect(grid?.columns).toEqual([
@@ -379,6 +384,108 @@ describe("parseDesignerSource list items", () => {
     expect(result.controlsByName.get("domainUpDown1")?.items).toEqual(["First", "Second"]);
     expect(result.controlsByName.get("listView1")?.items).toBeUndefined();
     expect(result.controlsByName.get("treeView1")?.items).toEqual(["Root", "Child"]);
+  });
+
+  it("resolves localized Items.AddRange resource calls to their visible values", () => {
+    const result = parseDesignerSource(`partial class LocalizedList {
+      private System.Windows.Forms.ComboBox combo;
+      private void InitializeComponent() {
+        System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(LocalizedList));
+        this.combo = new System.Windows.Forms.ComboBox();
+        this.combo.Items.AddRange(new object[] {
+          resources.GetString("combo.Items"),
+          "Literal",
+          resources.GetString("combo.Items1")});
+        this.Controls.Add(this.combo);
+      }
+    }`, {
+      sourcePath: "LocalizedList.Designer.cs",
+      resxData: new Map([["combo", new Map([["Items", "Anonymous"], ["Items1", "User"]])]]),
+    });
+
+    expect(result.controlsByName.get("combo")?.items).toEqual(["Anonymous", "Literal", "User"]);
+  });
+
+  it("resolves localized ListView column text and width", () => {
+    const result = parseDesignerSource(`partial class LocalizedColumns {
+      private System.Windows.Forms.ListView list;
+      private System.Windows.Forms.ColumnHeader titleColumn;
+      private void InitializeComponent() {
+        this.list = new System.Windows.Forms.ListView();
+        this.titleColumn = new System.Windows.Forms.ColumnHeader();
+        this.list.Columns.AddRange(new System.Windows.Forms.ColumnHeader[] { this.titleColumn });
+        this.Controls.Add(this.list);
+      }
+    }`, {
+      sourcePath: "LocalizedColumns.Designer.cs",
+      resxData: new Map([["titleColumn", new Map([["Text", "Title"], ["Width", "150"]])]]),
+    });
+
+    expect(result.controlsByName.get("list")?.columns).toEqual([
+      expect.objectContaining({ name: "titleColumn", headerText: "Title", width: 150 }),
+    ]);
+  });
+
+  it("merges localized appearance properties into the same neutral IR as direct Designer assignments", () => {
+    const result = parseDesignerSource(`partial class LocalizedAppearance {
+      private System.Windows.Forms.Button authorize;
+      private System.Windows.Forms.TextBox notes;
+      private System.Windows.Forms.TextBox secret;
+      private System.Windows.Forms.ComboBox mode;
+      private void InitializeComponent() {
+        this.authorize = new System.Windows.Forms.Button();
+        this.notes = new System.Windows.Forms.TextBox();
+        this.secret = new System.Windows.Forms.TextBox();
+        this.mode = new System.Windows.Forms.ComboBox();
+        this.Controls.Add(this.authorize);
+        this.Controls.Add(this.notes);
+        this.Controls.Add(this.secret);
+        this.Controls.Add(this.mode);
+      }
+    }`, {
+      sourcePath: "LocalizedAppearance.Designer.cs",
+      resxData: new Map([
+        ["authorize", new Map([
+          ["TextAlign", "MiddleLeft"], ["BackColor", "Window"], ["ForeColor", "Navy"],
+          ["BorderStyle", "FixedSingle"], ["Padding", "1, 2, 3, 4"], ["Margin", "5, 6, 7, 8"],
+          ["RightToLeft", "Yes"], ["FlatStyle", "Flat"], ["MinimumSize", "70, 20"], ["MaximumSize", "100, 30"],
+        ])],
+        ["notes", new Map([
+          ["ReadOnly", "True"], ["Multiline", "True"], ["WordWrap", "False"], ["MaxLength", "80"], ["ScrollBars", "Vertical"],
+        ])],
+        ["secret", new Map([["UseSystemPasswordChar", "True"]])],
+        ["mode", new Map([["DropDownStyle", "DropDownList"]])],
+        ["$this", new Map([
+          ["Font", "Segoe UI, 9.75pt"], ["BackColor", "Control"], ["ForeColor", "WindowText"],
+          ["MinimumSize", "320, 240"], ["MaximumSize", "1280, 900"],
+        ])],
+      ]),
+    });
+
+    expect(result.controlsByName.get("authorize")?.appearance).toEqual(expect.objectContaining({
+      textAlign: { horizontal: "Left", vertical: "Middle" },
+      backColor: { cssColor: "#ffffff", name: "Window" },
+      foreColor: { cssColor: "#000080", name: "Navy" },
+      borderStyle: "FixedSingle",
+      padding: { left: 1, top: 2, right: 3, bottom: 4 },
+      margin: { left: 5, top: 6, right: 7, bottom: 8 },
+      rightToLeft: true,
+      flatStyle: "Flat",
+      minimumSize: { width: 70, height: 20 },
+      maximumSize: { width: 100, height: 30 },
+    }));
+    expect(result.controlsByName.get("notes")?.appearance).toEqual(expect.objectContaining({
+      readOnly: true, multiline: true, wordWrap: false, maxLength: 80, scrollBars: "Vertical",
+    }));
+    expect(result.controlsByName.get("secret")?.appearance.passwordChar).toBe("•");
+    expect(result.controlsByName.get("mode")?.appearance.dropDownStyle).toBe("DropDownList");
+    expect(result.form.properties).toEqual(expect.objectContaining({
+      Font: { family: "Segoe UI", size: 9.75 },
+      BackColor: { cssColor: "#f0f0f0", name: "Control" },
+      ForeColor: { cssColor: "#000000", name: "WindowText" },
+      MinimumSize: { width: 320, height: 240 },
+      MaximumSize: { width: 1280, height: 900 },
+    }));
   });
 });
 
@@ -783,6 +890,9 @@ partial class FormPropsForm
         this.WindowState = System.Windows.Forms.FormWindowState.Maximized;
         this.Opacity = 0.8;
         this.AcceptButton = this.okButton;
+        this.BackColor = System.Drawing.SystemColors.Window;
+        this.ForeColor = System.Drawing.Color.Navy;
+        this.Font = new System.Drawing.Font("Microsoft Sans Serif", 9.75F);
         this.ClientSize = new System.Drawing.Size(200, 100);
         this.Text = "Props";
     }
@@ -801,6 +911,9 @@ describe("parseDesignerSource form-level properties", () => {
     expect(result.form.windowState).toBe("Maximized");
     expect(result.form.opacity).toBe(0.8);
     expect(result.form.acceptButton).toBe("okButton");
+    expect(result.form.properties.BackColor).toEqual({ cssColor: "#ffffff", name: "Window" });
+    expect(result.form.properties.ForeColor).toEqual({ cssColor: "#000080", name: "Navy" });
+    expect(result.form.properties.Font).toEqual(expect.objectContaining({ family: "Microsoft Sans Serif", size: 9.75 }));
   });
 });
 
@@ -1073,6 +1186,9 @@ describe("parseDesignerSource DataGridView nested style properties", () => {
     expect(result.controlsByName.get("chk1")?.appearance?.checked).toBe(true);
     expect(result.controlsByName.get("chk2")?.appearance?.checked).toBe(true);
     expect(result.controlsByName.get("chk3")?.appearance?.checked).toBe(false);
+    expect(result.controlsByName.get("chk1")?.appearance?.checkState).toBe("Checked");
+    expect(result.controlsByName.get("chk2")?.appearance?.checkState).toBe("Indeterminate");
+    expect(result.controlsByName.get("chk3")?.appearance?.checkState).toBe("Unchecked");
   });
 
   it("parses lesser-used control kinds and their events (breadth check)", () => {

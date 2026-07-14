@@ -1,4 +1,4 @@
-import { copyFile, mkdir, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ProjectIR } from "../ir/types.js";
 import { buildTargetManifest } from "../ir/targetManifest.js";
@@ -7,12 +7,17 @@ import {
   migrationStylesCss,
   migrationSurfaceTsx,
 } from "./migrationTargetRuntime.js";
+import { migrationVisualProfilesTsx, migrationVisualProfileStylesCss } from "./migrationVisualProfiles.js";
 
 export async function generateRefineProject(input: { outDir: string; project: ProjectIR }): Promise<void> {
   const generated = join(input.outDir, "src", "generated");
   const runtime = join(input.outDir, "src", "runtime");
   const providers = join(input.outDir, "src", "providers");
   const assets = join(input.outDir, "src", "assets");
+  // Assets are fully generated from the current IR. Clear only this owned
+  // directory so repeated single-form conversions cannot retain unrelated
+  // images from an earlier project and mask a missing context resolution.
+  await rm(assets, { recursive: true, force: true });
   await Promise.all([
     mkdir(generated, { recursive: true }),
     mkdir(runtime, { recursive: true }),
@@ -33,7 +38,8 @@ export async function generateRefineProject(input: { outDir: string; project: Pr
     writeFile(join(providers, "dataProvider.ts"), dataProviderTs(), "utf8"),
     writeFile(join(runtime, "MigrationSurface.tsx"), migrationSurfaceTsx(input.project), "utf8"),
     writeFile(join(runtime, "componentRegistry.tsx"), componentRegistryTsx(input.project), "utf8"),
-    writeFile(join(input.outDir, "src", "styles.css"), refineStylesCss(), "utf8"),
+    writeFile(join(runtime, "visualProfiles.tsx"), migrationVisualProfilesTsx(input.project), "utf8"),
+    writeFile(join(input.outDir, "src", "styles.css"), refineStylesCss(input.project), "utf8"),
     writeFile(join(input.outDir, "README.md"), refineReadme(manifest.totals), "utf8"),
     ...input.project.assets.map((asset) => asset.contentBase64
       ? writeFile(join(assets, asset.targetFileName), Buffer.from(asset.contentBase64, "base64"))
@@ -154,8 +160,8 @@ export const dataProvider: DataProvider = {
 `;
 }
 
-function refineStylesCss(): string {
-  return `${migrationStylesCss()}
+function refineStylesCss(project: ProjectIR): string {
+  return `${migrationStylesCss()}${migrationVisualProfileStylesCss(project)}
 .workbench { min-height: 100vh; display: grid; grid-template-columns: 248px minmax(0, 1fr); }
 .workbench-sidebar { position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; background: #172033; color: white; }
 .workbench-brand { padding: 22px 18px; border-bottom: 1px solid rgba(255,255,255,.1); }

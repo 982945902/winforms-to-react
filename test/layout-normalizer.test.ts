@@ -40,6 +40,16 @@ describe("semantic layout normalization", () => {
     expect(plan.diagnostics.stateAlternatives).toBe(0);
   });
 
+  it("keeps compact label and input siblings instead of treating the label as a state", () => {
+    const plan = normalizeLayout([
+      control({ kind: "Label", name: "lblAccountType", text: "Account type:", bounds: { x: 0, y: 0, width: 73, height: 13 } }),
+      control({ kind: "ComboBox", name: "cbAccountType", bounds: { x: 0, y: 16, width: 128, height: 21 } }),
+    ], { width: 128, height: 37 }, new Set());
+
+    expect(plan.root).toEqual(expect.objectContaining({ kind: "stack", axis: "vertical" }));
+    expect(plan.diagnostics.stateAlternatives).toBe(0);
+  });
+
   it("preserves a TabControl as selectable pages instead of stacking every tab", () => {
     const tabs = control({
       kind: "TabControl", name: "revisionTabs", appearance: { selectedIndex: 1 },

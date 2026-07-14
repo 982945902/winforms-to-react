@@ -74,7 +74,15 @@ export async function convertDesignerSources(inputPath: string, options: Convert
     // contract point (goal: 100% coverage). Missing hints fall back to unresolved.
     attachMigrationHints(result.form, cb);
     if (cb.layoutHints.length) result.form.runtimeLayoutHints = cb.layoutHints;
+    if (cb.visibilityGroups.length) result.form.runtimeVisibilityGroups = cb.visibilityGroups;
+    const controlBindings = validRuntimeControlBindings(result.form, cb);
+    if (controlBindings.length) result.form.runtimeControlBindings = controlBindings;
+    const tabNavigators = validRuntimeTabNavigators(result.form, cb);
+    if (tabNavigators.length) result.form.runtimeTabNavigators = tabNavigators;
+    applyRuntimeItemHints(result.form, cb);
+    applyRuntimeValueHints(result.form, cb);
     applyRuntimeAppearanceHints(result.form, cb);
+    applyPropertyGridHints(result.form, cb);
     if (cb.navigations.length) {
       // Drop false-positive navigations that target a menu/strip component:
       // `contextMenu.Show(point)` shows a popup at a location, not form navigation.
@@ -134,14 +142,148 @@ async function findCodeBehindFamily(designerPath: string): Promise<string[]> {
 function mergeCodeBehindInfos(infos: CodeBehindInfo[]): CodeBehindInfo {
   const unique = <T>(items: T[], key: (item: T) => string): T[] => [...new Map(items.map((item) => [key(item), item])).values()];
   return {
+    methods: unique(infos.flatMap((info) => info.methods), (item) => `${item.sourceFile}|${item.name}|${item.lineStart}`),
     handlers: unique(infos.flatMap((info) => info.handlers), (item) => `${item.sourceFile}|${item.handler}`),
     navigations: unique(infos.flatMap((info) => info.navigations), (item) => `${item.target}|${item.modal}|${item.fromHandler ?? ""}`),
     bindings: unique(infos.flatMap((info) => info.bindings), (item) => `${item.controlName}|${item.boundProperty ?? ""}|${item.kind}|${item.dataSource}`),
     layoutHints: unique(infos.flatMap((info) => info.layoutHints), (item) => item.kind === "reparent"
       ? `${item.kind}|${item.controlName}|${item.parentControlName}|${item.panel}`
       : `${item.kind}|${item.controlName}|${item.parentControlName}|${item.label}`),
+    visibilityGroups: unique(infos.flatMap((info) => info.visibilityGroups), (item) =>
+      item.variants.flatMap((variant) => variant.hiddenControls).sort().join("|")),
+    controlBindings: unique(infos.flatMap((info) => info.controlBindings), (item) =>
+      `${item.handler}|${item.targetControlName}|${item.targetProperty}|${item.sourceControlName}|${item.sourceProperty}|${Boolean(item.negated)}`),
+    tabNavigators: unique(infos.flatMap((info) => info.tabNavigators), (item) =>
+      `${item.navigatorControlName}|${item.property}|${item.tabControlName}`),
+    itemHints: unique(infos.flatMap((info) => info.itemHints), (item) =>
+      `${item.controlName}|${item.source.kind}|${item.source.typeName ?? ""}|${item.source.expression}`),
     appearanceHints: unique(infos.flatMap((info) => info.appearanceHints), (item) => `${item.controlName}|${item.property}|${item.value}`),
+    propertyGridHints: unique(infos.flatMap((info) => info.propertyGridHints), (item) =>
+      `${item.controlName}|${item.source.typeName ?? ""}|${item.source.expression}`),
+    valueHints: unique(infos.flatMap((info) => info.valueHints), (item) =>
+      `${item.controlName}|${item.source.property}|${item.source.sourceFile}|${item.source.line}`),
   };
+}
+
+function validRuntimeControlBindings(form: VisualForm, cb: CodeBehindInfo): NonNullable<VisualForm["runtimeControlBindings"]> {
+  if (cb.controlBindings.length === 0) return [];
+  const index = new Map<string, VisualControl>();
+  const handlerEvents = new Map<string, Array<{ controlName: string; event: string }>>();
+  const visit = (controls: VisualControl[]) => controls.forEach((control) => {
+    index.set(control.name, control);
+    for (const event of control.events) {
+      const entries = handlerEvents.get(event.handler) ?? [];
+      entries.push({ controlName: control.name, event: event.event });
+      handlerEvents.set(event.handler, entries);
+    }
+    visit(control.children);
+  });
+  visit(form.controls);
+  for (const event of form.events ?? []) {
+    const entries = handlerEvents.get(event.handler) ?? [];
+    entries.push({ controlName: form.name, event: event.event });
+    handlerEvents.set(event.handler, entries);
+  }
+
+  return cb.controlBindings.flatMap((binding) => {
+    if (!index.has(binding.sourceControlName) || !index.has(binding.targetControlName)) return [];
+    return (handlerEvents.get(binding.handler) ?? []).flatMap((trigger) => {
+      // Re-evaluate only when the control property actually driving the RHS is
+      // the one whose event invoked this handler. A handler may also read
+      // unrelated controls; turning those reads into live subscriptions would
+      // invent behavior that WinForms never wired.
+      if (trigger.controlName !== binding.sourceControlName) return [];
+      const expectedEvent = binding.sourceProperty === "checked" ? /^(?:CheckedChanged|CheckStateChanged)$/i
+        : new RegExp(`^${binding.sourceProperty}Changed$`, "i");
+      if (!expectedEvent.test(trigger.event)) return [];
+      return [{
+        ...binding,
+        triggerControlName: trigger.controlName,
+        triggerEvent: trigger.event,
+      }];
+    });
+  });
+}
+
+function validRuntimeTabNavigators(form: VisualForm, cb: CodeBehindInfo): CodeBehindInfo["tabNavigators"] {
+  if (cb.tabNavigators.length === 0) return [];
+  const index = new Map<string, VisualControl>();
+  const visit = (controls: VisualControl[]) => controls.forEach((control) => {
+    index.set(control.name, control);
+    visit(control.children);
+  });
+  visit(form.controls);
+  return cb.tabNavigators.filter((binding) => {
+    const navigator = index.get(binding.navigatorControlName);
+    const tabControl = index.get(binding.tabControlName);
+    return Boolean(navigator && tabControl?.kind === "TabControl" && navigator !== tabControl);
+  });
+}
+
+function applyRuntimeItemHints(form: VisualForm, cb: CodeBehindInfo): void {
+  if (cb.itemHints.length === 0) return;
+  const index = new Map<string, VisualControl>();
+  const visit = (controls: VisualControl[]) => controls.forEach((control) => {
+    index.set(control.name, control);
+    visit(control.children);
+  });
+  visit(form.controls);
+
+  for (const hint of cb.itemHints) {
+    const control = index.get(hint.controlName);
+    if (!control) continue;
+    const sources = control.itemSources ?? [];
+    if (!sources.some((source) => source.kind === hint.source.kind
+      && source.typeName === hint.source.typeName
+      && source.expression === hint.source.expression)) {
+      sources.push(hint.source);
+    }
+    control.itemSources = sources;
+  }
+}
+
+function applyRuntimeValueHints(form: VisualForm, cb: CodeBehindInfo): void {
+  if (cb.valueHints.length === 0) return;
+  const methodsByName = new Map<string, CodeBehindInfo["methods"]>();
+  for (const method of cb.methods) {
+    const bucket = methodsByName.get(method.name) ?? [];
+    bucket.push(method);
+    methodsByName.set(method.name, bucket);
+  }
+  const reachable = new Set<string>([form.name, "OnLoad", "OnShown"]);
+  for (const event of form.events ?? []) {
+    if (/^(?:Load|Shown)$/i.test(event.event)) reachable.add(event.handler);
+  }
+  const queue = [...reachable];
+  while (queue.length > 0) {
+    const methodName = queue.shift()!;
+    for (const method of methodsByName.get(methodName) ?? []) {
+      for (const symbol of method.calledSymbols) {
+        const called = symbol.split(".").pop()!;
+        if (!methodsByName.has(called) || reachable.has(called)) continue;
+        reachable.add(called);
+        queue.push(called);
+      }
+    }
+  }
+
+  const index = new Map<string, VisualControl>();
+  const visit = (controls: VisualControl[]) => controls.forEach((control) => {
+    index.set(control.name, control);
+    visit(control.children);
+  });
+  visit(form.controls);
+  for (const hint of cb.valueHints) {
+    if (!reachable.has(hint.source.methodName)) continue;
+    const control = index.get(hint.controlName);
+    if (!control) continue;
+    const sources = control.runtimeValueSources ?? [];
+    if (!sources.some((source) => source.property === hint.source.property
+      && source.sourceFile === hint.source.sourceFile && source.line === hint.source.line)) {
+      sources.push(hint.source);
+    }
+    control.runtimeValueSources = sources;
+  }
 }
 
 function applyRuntimeAppearanceHints(form: VisualForm, cb: CodeBehindInfo): void {
@@ -157,6 +299,22 @@ function applyRuntimeAppearanceHints(form: VisualForm, cb: CodeBehindInfo): void
   }
 }
 
+function applyPropertyGridHints(form: VisualForm, cb: CodeBehindInfo): void {
+  if (cb.propertyGridHints.length === 0) return;
+  const index = new Map<string, VisualControl>();
+  const visit = (controls: VisualControl[]) => controls.forEach((control) => {
+    index.set(control.name, control);
+    visit(control.children);
+  });
+  visit(form.controls);
+  for (const hint of cb.propertyGridHints) {
+    const control = index.get(hint.controlName);
+    if (control?.kind !== "PropertyGrid") continue;
+    // Prefer a source whose type could be proven over an untyped assignment.
+    if (!control.propertyGridSource?.typeName || hint.source.typeName) control.propertyGridSource = hint.source;
+  }
+}
+
 function isAutoGenerated(source: string): boolean {
   if (!/void\s+InitializeComponent\s*\(\s*\)/.test(source)) return true;
   if (/<auto-generated>/.test(source)) return true;
@@ -169,6 +327,12 @@ export async function collectBaseKindMap(inputPath: string): Promise<{ baseKindM
   const info = await stat(inputPath);
   if (info.isDirectory()) {
     await walkCs(inputPath, csFiles);
+  } else if (inputPath.endsWith(".Designer.cs")) {
+    // Single-form conversion already reads the matching code-behind for events.
+    // Use that same family for inheritance and custom-control properties too, so
+    // `FormX : ProjectFormBase` is not lost merely because the caller selected
+    // one Designer file instead of scanning the whole project.
+    csFiles.push(...await findCodeBehindFamily(inputPath));
   }
 
   const map = new Map<string, string>();
@@ -241,38 +405,42 @@ export async function collectUserControlDefinitions(
       const designerPath = designerMap.get(className);
       if (!designerPath || defs.has(className)) continue;
       const designerSource = await readFile(designerPath, "utf8");
-      const miniForm = parseDesignerSource(designerSource, { sourcePath: designerPath, baseKindMap });
+      const resxData = await readOptionalResx(designerPath);
+      const miniForm = parseDesignerSource(designerSource, { sourcePath: designerPath, baseKindMap, resxData });
       if (miniForm.form.controls.length > 0) {
-        defs.set(className, miniForm.form.controls.map((c) => ({ ...c, typeName: className })));
+        defs.set(className, miniForm.form.controls);
       }
     }
   }
   // Second: heuristic for Designer.cs files without explicit base class declaration
   for (const [className, designerPath] of designerMap) {
     if (defs.has(className)) continue;
+    // A Form whose ClientSize happens to live in resx must never become a
+    // shared UserControl merely because its Designer file lacks a direct
+    // ClientSize assignment.
+    if (inheritsFrom(className, "Form", baseKindMap)) continue;
     const designerSource = await readFile(designerPath, "utf8");
-    const hasClientSize = /this\.ClientSize\s*=/.test(designerSource);
+    const resxData = await readOptionalResx(designerPath);
+    const hasClientSize = /this\.ClientSize\s*=/.test(designerSource)
+      || Boolean(resxData?.get("$this")?.has("ClientSize"));
     const hasInitializeComponent = /void\s+InitializeComponent/.test(designerSource);
     const hasControlsAdd = /Controls\.Add/.test(designerSource);
     // UserControl Designer: has InitializeComponent + Controls.Add but NO clientSize
     // Form Designer: has ALL THREE (InitializeComponent, Controls.Add, ClientSize)
     if (hasInitializeComponent && hasControlsAdd && !hasClientSize) {
-      const addPattern = /this\.Controls\.Add\(\s*(?:this\.)?([A-Za-z_]\w*)\s*\)/g;
-      const added = new Set<string>();
-      const kids: Array<{ name: string; kind: string; typeName: string }> = [];
-      for (const m of designerSource.matchAll(addPattern)) {
-        const childName = m[1];
-        if (added.has(childName)) continue;
-        added.add(childName);
-        let kind = "Control";
-        const newMatch = designerSource.match(new RegExp(`this\\.${childName}\\s*=\\s*new\\s+([\\w.]+)\\s*\\(`));
-        if (newMatch) kind = newMatch[1].split(".").pop() ?? newMatch[1];
-        kids.push({ name: childName, kind, typeName: className });
-      }
-      if (kids.length > 0) { const full = kids.map((k) => ({ ...k, appearance: {}, properties: {}, events: [], children: [] })); defs.set(className, full); }
+      const miniForm = parseDesignerSource(designerSource, { sourcePath: designerPath, baseKindMap, resxData });
+      if (miniForm.form.controls.length > 0) defs.set(className, miniForm.form.controls);
     }
   }
   return defs;
+}
+
+async function readOptionalResx(designerPath: string): Promise<ResxData | undefined> {
+  try {
+    return await parseResx(findResxForDesigner(designerPath)!);
+  } catch {
+    return undefined;
+  }
 }
 
 export function inheritsFrom(typeName: string, baseName: string, baseKindMap: Map<string, string>): boolean {

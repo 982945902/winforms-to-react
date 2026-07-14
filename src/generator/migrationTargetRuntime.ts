@@ -21,6 +21,7 @@ export function migrationSurfaceTsx(projectIr: ProjectIR): string {
   return `import React from "react";
 import { Button, Checkbox, Input, InputNumber, Radio, Select, Tag } from "antd";
 import project from "../generated/project.ir.json";
+import { componentVisualAdapter, controlUsesVisualProfile, pageUsesVisualProfile, profileVisualComponent } from "./visualProfiles";
 
 type Control = any;
 type DefinitionAdapterProps = { control: Control; depth?: number; registry?: Record<string, React.ComponentType<DefinitionAdapterProps>> };
@@ -31,7 +32,24 @@ ${assetEntries}
 };
 
 const definitions = new Map((project.components as any[]).map((item) => [item.id, item]));
+const RuntimeVisibilityContext = React.createContext<ReadonlySet<Control>>(new Set());
+const RuntimeTabNavigatorContext = React.createContext<ReadonlyMap<Control, Control>>(new Map());
+const RuntimeControlIndexContext = React.createContext<ReadonlyMap<string, Control>>(new Map());
+type RuntimeControlStateProperty = "checked" | "enabled" | "readOnly" | "visible";
+type RuntimeControlStateContextValue = {
+  index: ReadonlyMap<string, Control>;
+  bindingsByTarget: ReadonlyMap<string, any[]>;
+  getValue: (controlName: string, property: RuntimeControlStateProperty, fallbackControl?: Control, scope?: string) => boolean;
+  setValue: (controlName: string, property: RuntimeControlStateProperty, value: boolean, scope?: string) => void;
+};
+const RuntimeControlStateContext = React.createContext<RuntimeControlStateContextValue>({
+  index: new Map(), bindingsByTarget: new Map(), getValue: () => false, setValue: () => undefined,
+});
+const RuntimeControlScopeContext = React.createContext("page");
+type RuntimeCoordinateSpace = { width?: number; height?: number };
+const RuntimeCoordinateSpaceContext = React.createContext<RuntimeCoordinateSpace>({});
 const previewPage: any = (project.pages as any[])[0];
+const RuntimePageContext = React.createContext<any>(previewPage);
 const previewFileName = String(previewPage?.sourcePath || "MigratedForm.cs").replace(/\\\\/g, "/").split("/").pop()?.replace(".Designer", "") || "MigratedForm.cs";
 const previewFilePaths = [...new Set([
   ...(project.pages as any[]).map((item) => item.sourcePath),
@@ -130,6 +148,7 @@ function usePreviewRuntime() {
 
 export function createDefinitionAdapter(componentId: string) {
   return function DefinitionAdapter({ control, depth = 0, registry = {} }: DefinitionAdapterProps) {
+    const parentControlScope = React.useContext(RuntimeControlScopeContext);
     const definition: any = definitions.get(componentId);
     if (!definition || depth > 8) {
       return <div className="migration-custom unresolved">
@@ -138,53 +157,228 @@ export function createDefinitionAdapter(componentId: string) {
       </div>;
     }
     if (definition.status === "external") {
-      if (componentId === "TextEditorControl") return <DiffPreview />;
-      if (componentId === "RevisionDiffControl") return /filetree/i.test(control.name) ? <FileTreePreview /> : <RevisionDiffPreview />;
-      if (componentId === "RevisionGridControl") return <RevisionGridPreview />;
-      if (componentId === "RepoObjectsTree") return <RepositoryTreePreview />;
-      if (componentId === "CommitInfo") return <CommitInfoPreview />;
-      if (componentId === "RevisionGpgInfoControl") return <GpgInfoPreview />;
-      if (componentId === "InteractiveGitActionControl") return <GitActionPreview control={control} />;
-      if (componentId === "FilterToolBar") return <FilterToolbarPreview />;
-      if (componentId === "MenuStripEx") return <NativeMenuBar controls={control.children || []} />;
-      if (componentId === "ToolStripEx") return <NativeToolStrip control={control} />;
+      const profileAdapter = componentVisualAdapter(componentId, control);
+      if (profileAdapter === "git-diff") return <DiffPreview />;
+      if (profileAdapter === "git-file-tree") return <FileTreePreview />;
+      if (profileAdapter === "git-revision-diff") return <RevisionDiffPreview />;
+      if (profileAdapter === "git-revision-grid") return <RevisionGridPreview />;
+      if (profileAdapter === "git-repository-tree") return <RepositoryTreePreview />;
+      if (profileAdapter === "git-commit-info") return <CommitInfoPreview />;
+      if (profileAdapter === "git-gpg-info") return <GpgInfoPreview />;
+      if (profileAdapter === "git-action") return <GitActionPreview control={control} />;
+      if (profileAdapter === "git-filter-toolbar") return <FilterToolbarPreview />;
+      if (profileAdapter === "git-menu-strip") return <NativeMenuBar controls={control.children || []} />;
+      if (profileAdapter === "git-tool-strip") return <NativeToolStrip control={control} />;
       if (/(?:DatePicker|DateEdit|DateInput)$/i.test(componentId)) return <SemanticDateInput control={control} />;
       if (/(?:Phone|TextBox|TextEdit|MemoEdit)$/i.test(componentId)) return <SemanticTextInput control={control} />;
       if (/(?:ComboBox|Lookup|Picker|Selector)/i.test(componentId)) return <SemanticComboInput control={control} />;
       if (/(?:Warning|Validation|Integrity|ErrorIndicator)/i.test(componentId)) return <SemanticWarningIndicator control={control} />;
       return control.children?.length ? <div className="migration-custom external-inline">
         <div className="migration-inline-controls"><ControlTree controls={compactToolbarControls(control.children)} registry={registry} depth={depth + 1} normalized /></div>
-      </div> : componentId === "ToolStripEx" ? <div className="migration-custom external-inline native-empty-toolbar">{control.text || "Toolbar"}</div>
-        : <div className="migration-custom native-external-surface"><strong>{humanizeType(componentId)}</strong><span>shared component preview</span></div>;
+      </div> : <div className="migration-custom native-external-surface"><strong>{humanizeType(componentId)}</strong><span>shared component preview</span></div>;
     }
-    const index = indexControls(definition.controls);
+    // A Designer-backed UserControl already owns a local coordinate system.
+    // Keep it intact so one shared definition renders like the source at every
+    // host instance; semantic page layout must not reorder its internal fields.
+    const boundControls = applyComponentPropertyBindings(definition, control);
     return <div className="migration-custom resolved-component">
       <Tag className="component-type-tag" color="blue">{componentId}</Tag>
-      {definition.layout?.root
-        ? <LayoutNodeView node={definition.layout.root} index={index} registry={registry} depth={depth + 1} contextName={control.name} />
-        : <ControlTree controls={definition.controls} registry={registry} depth={depth + 1} />}
+      <RuntimeControlScopeContext.Provider value={parentControlScope + "/" + control.name}><RuntimeControlIndexContext.Provider value={indexControls(boundControls)}><RuntimeCoordinateSpaceContext.Provider value={definition.clientSize || definition.layout?.sourceSize || {}}>
+         <ControlTree controls={boundControls} registry={registry} depth={depth + 1} contextName={control.name} />
+       </RuntimeCoordinateSpaceContext.Provider></RuntimeControlIndexContext.Provider></RuntimeControlScopeContext.Provider>
     </div>;
   };
 }
 
+function applyComponentPropertyBindings(definition: any, host: Control): Control[] {
+  const bindings = definition.propertyBindings || [];
+  if (!bindings.length) return definition.controls || [];
+  const byTarget = new Map<string, any[]>();
+  for (const binding of bindings) {
+    const raw = componentHostValue(host, binding.sourceProperty);
+    if (raw === undefined) continue;
+    const list = byTarget.get(binding.targetControlName) || [];
+    list.push({ ...binding, raw });
+    byTarget.set(binding.targetControlName, list);
+  }
+  if (!byTarget.size) return definition.controls || [];
+  const visit = (controls: Control[]): Control[] => controls.map((source) => {
+    const targetBindings = byTarget.get(source.name) || [];
+    const children = visit(source.children || []);
+    if (!targetBindings.length && children === source.children) return source;
+    let control = { ...source, children, appearance: { ...(source.appearance || {}) } };
+    for (const binding of targetBindings) control = applyComponentBinding(control, binding);
+    return control;
+  });
+  return visit(definition.controls || []);
+}
+
+function componentHostValue(host: Control, sourceProperty: string): unknown {
+  if (Object.prototype.hasOwnProperty.call(host.properties || {}, sourceProperty)) return host.properties[sourceProperty];
+  if (sourceProperty === "Text") return host.text;
+  const appearanceKey = sourceProperty.charAt(0).toLocaleLowerCase() + sourceProperty.slice(1);
+  if (Object.prototype.hasOwnProperty.call(host.appearance || {}, appearanceKey)) return host.appearance[appearanceKey];
+  return undefined;
+}
+
+function applyComponentBinding(control: Control, binding: any): Control {
+  let value = binding.raw;
+  if (binding.negated) value = !componentBoolean(value);
+  if (binding.targetProperty === "text") return { ...control, text: String(value ?? "") };
+  if (binding.targetProperty === "selectedIndex" || binding.targetProperty === "selectedItem") {
+    const numeric = Number(value);
+    const matched = (control.items || []).findIndex((item: string) => item === String(value) || item.toLocaleLowerCase() === String(value).toLocaleLowerCase());
+    const selectedIndex = matched >= 0 ? matched : Number.isFinite(numeric) ? numeric : control.appearance?.selectedIndex;
+    return { ...control, appearance: { ...control.appearance, selectedIndex } };
+  }
+  const normalized = ["checked", "enabled", "readOnly", "visible"].includes(binding.targetProperty)
+    ? componentBoolean(value)
+    : value;
+  return { ...control, appearance: { ...control.appearance, [binding.targetProperty]: normalized } };
+}
+
+function componentBoolean(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  return !/^(?:false|0|null|undefined)$/i.test(String(value).trim());
+}
+
+function defaultControlStateValue(control: Control | undefined, property: RuntimeControlStateProperty): boolean {
+  const value = control?.appearance?.[property];
+  if (value !== undefined) return componentBoolean(value);
+  return property === "enabled" || property === "visible";
+}
+
+function RuntimeControlStateProvider({ page, index, children }: { page: any; index: ReadonlyMap<string, Control>; children: React.ReactNode }) {
+  const [values, setValues] = React.useState<Record<string, boolean>>({});
+  const bindingsByTarget = React.useMemo(() => {
+    const result = new Map<string, any[]>();
+    for (const binding of page.runtimeControlBindings || []) {
+      const entries = result.get(binding.targetControlName) || [];
+      entries.push(binding);
+      result.set(binding.targetControlName, entries);
+    }
+    return result;
+  }, [page]);
+  const getValue = React.useCallback((controlName: string, property: RuntimeControlStateProperty, fallbackControl?: Control, scope = "page") => {
+    const key = scope + ":" + controlName + "." + property;
+    return Object.prototype.hasOwnProperty.call(values, key)
+      ? values[key]
+      : defaultControlStateValue(fallbackControl || index.get(controlName), property);
+  }, [index, values]);
+  const setValue = React.useCallback((controlName: string, property: RuntimeControlStateProperty, value: boolean, scope = "page") => {
+    const key = scope + ":" + controlName + "." + property;
+    setValues((current) => current[key] === value ? current : { ...current, [key]: value });
+  }, []);
+  const context = React.useMemo(() => ({ index, bindingsByTarget, getValue, setValue }), [index, bindingsByTarget, getValue, setValue]);
+  return <RuntimeControlStateContext.Provider value={context}>{children}</RuntimeControlStateContext.Provider>;
+}
+
+function applyRuntimeControlBindings(control: Control, state: RuntimeControlStateContextValue): Control {
+  const bindings = state.bindingsByTarget.get(control.name) || [];
+  if (!bindings.length) return control;
+  const appearance = { ...(control.appearance || {}) };
+  for (const binding of bindings) {
+    let value = state.getValue(binding.sourceControlName, binding.sourceProperty);
+    if (binding.negated) value = !value;
+    appearance[binding.targetProperty] = value;
+  }
+  return { ...control, appearance };
+}
+
+function NativeCommandButton({ control, style, normalized, text }: { control: Control; style: React.CSSProperties; normalized: boolean; text: string }) {
+  const controlIndex = React.useContext(RuntimeControlIndexContext);
+  const { runCommand } = usePreviewRuntime();
+  const host = React.useRef<HTMLDivElement>(null);
+  const [menuOpen, setMenuOpen] = React.useState(false);
+  const menuName = typeof control.properties?.Menu === "string" && control.properties.Menu !== "null"
+    ? control.properties.Menu : undefined;
+  const linkedMenu = menuName ? controlIndex.get(menuName) : undefined;
+  const menuItems = (linkedMenu?.children || []).filter((item: Control) => item.appearance?.visible !== false);
+  const hasMenu = Boolean(menuName);
+  React.useEffect(() => {
+    if (!menuOpen) return;
+    const close = (event: PointerEvent) => {
+      if (!host.current?.contains(event.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [menuOpen]);
+  const iconOnly = normalized && control.kind.startsWith("ToolStrip") && !control.text;
+  const glyph = controlButtonGlyph(control);
+  const buttonClass = (iconOnly ? "native-icon-button" : "native-command-button") + buttonImageAlignmentClass(control)
+    + (hasMenu ? " native-menu-command" : "") + (controlUsesVisualProfile(control, "opendental", "Button") ? " native-od-button" : "");
+  const button = <Button style={hasMenu ? { width: "100%", height: "100%" } : style} size="small"
+    disabled={control.appearance?.enabled === false} className={buttonClass}
+    aria-haspopup={hasMenu ? "menu" : undefined} aria-expanded={hasMenu ? menuOpen : undefined}
+    onClick={() => menuItems.length ? setMenuOpen((value) => !value) : runCommand(text || control.name)}
+    title={text + (eventTitle(control) ? "\\n" + eventTitle(control) : "")}>
+    {(controlIconUrl(control) || glyph) && <ControlIcon control={control} className="native-button-glyph" fallback={glyph} />}
+    {!iconOnly && text && <span>{text}</span>}
+    {hasMenu && <span className="native-menu-command-arrow" aria-hidden="true">▾</span>}
+  </Button>;
+  if (!hasMenu) return button;
+  return <div ref={host} style={style} className="native-menu-button-host">
+    {button}
+    {menuOpen && linkedMenu && <LinkedControlMenu menu={linkedMenu} onClose={() => setMenuOpen(false)} />}
+  </div>;
+}
+
+function LinkedControlMenu({ menu, onClose, nested = false }: { menu: Control; onClose: () => void; nested?: boolean }) {
+  const { runCommand } = usePreviewRuntime();
+  const items = (menu.children || []).filter((item: Control) => item.appearance?.visible !== false);
+  const minWidth = Math.max(120, Number(menu.bounds?.width || 0));
+  return <div className={"native-linked-menu" + (nested ? " nested" : "")} role="menu" style={{ minWidth }}>
+    {items.map((item: Control) => {
+      if (item.kind === "ToolStripSeparator") return <span className="native-linked-menu-separator" role="separator" key={item.name} />;
+      const children = (item.children || []).filter((child: Control) => child.appearance?.visible !== false);
+      const shortcut = String(item.properties?.ShortcutKeyDisplayString || item.properties?.ShortcutKeys || "");
+      return <span className="native-linked-menu-item-host" key={item.name}>
+        <button type="button" role="menuitem" disabled={item.appearance?.enabled === false}
+          aria-haspopup={children.length ? "menu" : undefined}
+          onClick={() => {
+            if (children.length) return;
+            onClose();
+            const handler = item.events?.find((event: any) => event.event === "Click")?.handler;
+            runCommand((displayText(item) || item.name) + (handler ? " → " + handler : ""));
+            if (handler) window.dispatchEvent(new CustomEvent("wf-event", { detail: { control: item.name, handler } }));
+          }}>
+          {item.appearance?.checked === true && <span className="native-linked-menu-check">✓</span>}
+          {(controlIconUrl(item) || item.appearance?.imageKey) && <ControlIcon control={item} className="menu-item-icon" />}
+          <span className="native-linked-menu-label">{displayText(item) || humanizeType(item.name)}</span>
+          {shortcut && <kbd>{shortcut}</kbd>}
+          {children.length > 0 && <span className="native-linked-menu-arrow" aria-hidden="true">›</span>}
+        </button>
+        {children.length > 0 && <LinkedControlMenu menu={{ ...item, children }} onClose={onClose} nested />}
+      </span>;
+    })}
+  </div>;
+}
+
 function SemanticDateInput({ control }: { control: Control }) {
+  const ProfileVisual = profileVisualComponent(control);
+  if (ProfileVisual) return <ProfileVisual control={control} label={humanizeType(control.name)} />;
   return <span className="semantic-date-input"><input aria-label={humanizeType(control.name)} defaultValue={String(control.text || "")}
     readOnly={control.appearance?.readOnly === true} disabled={control.appearance?.enabled === false} />
-    <button type="button" disabled={control.appearance?.enabled === false} title="Open calendar" aria-label="Open calendar">▾</button></span>;
+    <button type="button" disabled={control.appearance?.enabled === false || control.appearance?.readOnly === true} title="Open calendar" aria-label="Open calendar"><span aria-hidden="true">▾</span></button></span>;
 }
 
 function SemanticTextInput({ control }: { control: Control }) {
   const multiline = control.appearance?.multiline === true || Number(control.bounds?.height || 0) > 28 || /memo|notes/i.test(control.name);
   const common = { "aria-label": humanizeType(control.name), maxLength: Number(control.appearance?.maxLength || 0) || undefined,
-    defaultValue: String(control.text || ""), readOnly: control.appearance?.readOnly === true, disabled: control.appearance?.enabled === false };
+    placeholder: control.appearance?.placeholderText, defaultValue: String(control.text || ""),
+    readOnly: control.appearance?.readOnly === true, disabled: control.appearance?.enabled === false };
   return multiline ? <textarea className="semantic-text-input multiline" wrap={control.appearance?.wordWrap === false ? "off" : "soft"} {...common} />
     : <input className="semantic-text-input" type={control.appearance?.passwordChar ? "password" : "text"} {...common} />;
 }
 
 function SemanticComboInput({ control }: { control: Control }) {
   const items = [...(control.items || [])] as string[];
-  if (control.properties?.IncludeUnassigned === true && !items.includes("Unassigned")) items.unshift("Unassigned");
+  const unassignedLabel = String(control.properties?.HqDescription || "Unassigned");
+  if (control.properties?.IncludeUnassigned === true && !items.includes(unassignedLabel)) items.unshift(unassignedLabel);
   const selected = control.appearance?.selectedIndex >= 0 ? items[control.appearance.selectedIndex] : "";
+  const ProfileVisual = profileVisualComponent(control);
+  if (ProfileVisual) return <ProfileVisual control={control} label={humanizeType(control.name)} items={items} selected={selected} />;
   return <select className="semantic-combo-input" aria-label={humanizeType(control.name)} disabled={control.appearance?.enabled === false} defaultValue={selected}>
     <option value=""> </option>{items.map((item) => <option key={item} value={item}>{item}</option>)}</select>;
 }
@@ -726,14 +920,10 @@ function ConsolePreview() {
   </div></div>;
 }
 
-function formInherits(page: any, baseType: string): boolean {
-  return (page.baseTypes || []).some((item: string) => item.split(".").pop() === baseType);
-}
-
 function NativeWindowFrame({ page, children }: { page: any; children: React.ReactNode }) {
   const { runCommand } = usePreviewRuntime();
-  const gitPreview = /^FormBrowse$/i.test(String(page.name || ""));
-  const openDentalPreview = formInherits(page, "FormODBase");
+  const gitPreview = pageUsesVisualProfile(page, "gitextensions-workspace");
+  const openDentalPreview = pageUsesVisualProfile(page, "opendental");
   const title = gitPreview
     ? previewRepository.name + " (" + previewRepository.branch + ") - " + (page.text || "Git Extensions") + " " + previewRepository.version
     : String(page.text || page.name || "WinForms application");
@@ -767,10 +957,27 @@ function NativeWindowFrame({ page, children }: { page: any; children: React.Reac
 
 export function MigrationSurface({ page, registry }: { page: any; registry: Record<string, React.ComponentType<DefinitionAdapterProps>> }) {
   const index = indexControls(page.controls);
+  const defaultHiddenControls = new Set<Control>();
+  const runtimeTabNavigators = new Map<Control, Control>();
+  for (const group of page.runtimeVisibilityGroups || []) {
+    const variant = group.variants?.[Number(group.defaultVariant || 0)];
+    for (const name of variant?.hiddenControls || []) {
+      const control = index.get(name);
+      if (control) defaultHiddenControls.add(control);
+    }
+  }
+  for (const binding of page.runtimeTabNavigators || []) {
+    const navigator = index.get(binding.navigatorControlName);
+    const sourceTabs = index.get(binding.tabControlName);
+    if (!navigator || !sourceTabs) continue;
+    runtimeTabNavigators.set(navigator, sourceTabs);
+    defaultHiddenControls.add(sourceTabs);
+  }
   const sourceWidth = Number(page.layout?.sourceSize?.width || 1180);
   const sourceHeight = Number(page.layout?.sourceSize?.height || 620);
-  const gitPreview = /^FormBrowse$/i.test(String(page.name || ""));
-  const openDentalPreview = formInherits(page, "FormODBase");
+  const fixedClientStyle = pageClientStyle(page);
+  const gitPreview = pageUsesVisualProfile(page, "gitextensions-workspace");
+  const openDentalPreview = pageUsesVisualProfile(page, "opendental");
   const canvasStyle = gitPreview
     ? { width: "100%", minWidth: Math.min(1406, Math.max(1180, sourceWidth)), height: "clamp(620px, calc(100vh - 2px), 725px)" }
     : openDentalPreview
@@ -790,9 +997,9 @@ export function MigrationSurface({ page, registry }: { page: any; registry: Reco
     </header>
     <div className="migration-canvas-scroll migration-layout-scroll">
       <div className="migration-canvas migration-layout-canvas" style={canvasStyle}>
-        <PreviewRuntimeProvider><NativeWindowFrame page={page}>{gitPreview && page.layout?.root
+        <RuntimePageContext.Provider value={page}><RuntimeControlIndexContext.Provider value={index}><RuntimeControlStateProvider page={page} index={index}><RuntimeTabNavigatorContext.Provider value={runtimeTabNavigators}><RuntimeVisibilityContext.Provider value={defaultHiddenControls}><PreviewRuntimeProvider><NativeWindowFrame page={page}>{gitPreview && page.layout?.root
             ? <LayoutNodeView node={page.layout.root} index={index} registry={registry} depth={0} />
-            : <div className="native-fixed-client"><ControlTree controls={page.controls} registry={registry} depth={0} /></div>}</NativeWindowFrame></PreviewRuntimeProvider>
+            : <div className="native-fixed-client" style={fixedClientStyle}><RuntimeCoordinateSpaceContext.Provider value={{ width: sourceWidth, height: sourceHeight }}><ControlTree controls={page.controls} registry={registry} depth={0} /></RuntimeCoordinateSpaceContext.Provider></div>}</NativeWindowFrame></PreviewRuntimeProvider></RuntimeVisibilityContext.Provider></RuntimeTabNavigatorContext.Provider></RuntimeControlStateProvider></RuntimeControlIndexContext.Provider></RuntimePageContext.Provider>
       </div>
     </div>
   </section>;
@@ -803,6 +1010,23 @@ function indexControls(controls: Control[]): Map<string, Control> {
   const visit = (items: Control[]) => items.forEach((control) => { index.set(control.name, control); visit(control.children || []); });
   visit(controls);
   return index;
+}
+
+function pageClientStyle(page: any): React.CSSProperties {
+  const style: React.CSSProperties & Record<string, string | number | undefined> = {};
+  const backColor = page.properties?.BackColor?.cssColor;
+  const foreColor = page.properties?.ForeColor?.cssColor;
+  const font = page.properties?.Font || {};
+  if (backColor) {
+    style.background = backColor;
+    style["--wf-control-surface"] = backColor;
+  }
+  if (foreColor) style.color = foreColor;
+  if (font.family) style.fontFamily = font.family;
+  if (Number(font.size) > 0) style.fontSize = Number(font.size) * 4 / 3;
+  if (font.bold) style.fontWeight = 700;
+  if (font.italic) style.fontStyle = "italic";
+  return style;
 }
 
 function LayoutNodeView({ node, index, registry, depth, contextName }: { node: LayoutNode; index: Map<string, Control>; registry: Record<string, React.ComponentType<DefinitionAdapterProps>>; depth: number; contextName?: string }) {
@@ -944,11 +1168,24 @@ function LayerLayoutNode({ node, index, registry, depth, contextName, roleClass 
 }
 
 function ControlTree({ controls, registry = {}, depth = 0, normalized = false, contextName }: { controls: Control[]; registry?: Record<string, React.ComponentType<DefinitionAdapterProps>>; depth?: number; normalized?: boolean; contextName?: string }) {
-  return <>{controls.map((control) => <ControlNode key={control.name} control={control} registry={registry} depth={depth} normalized={normalized} contextName={contextName} />)}</>;
+  return <>{controls.map((control, index) => <ControlNode key={control.name} control={control} registry={registry} depth={depth} normalized={normalized}
+    zIndex={normalized ? undefined : controls.length - index} contextName={contextName} />)}</>;
 }
 
-function ControlNode({ control, registry, depth, normalized = false, contextName }: { control: Control; registry: Record<string, React.ComponentType<DefinitionAdapterProps>>; depth: number; normalized?: boolean; contextName?: string }) {
-  const style = normalized ? normalizedControlStyle(control) : controlStyle(control);
+function ControlNode({ control, registry, depth, normalized = false, zIndex, contextName }: { control: Control; registry: Record<string, React.ComponentType<DefinitionAdapterProps>>; depth: number; normalized?: boolean; zIndex?: number; contextName?: string }) {
+  const runtimeHiddenControls = React.useContext(RuntimeVisibilityContext);
+  const runtimeTabNavigators = React.useContext(RuntimeTabNavigatorContext);
+  const runtimeControlState = React.useContext(RuntimeControlStateContext);
+  const runtimeControlScope = React.useContext(RuntimeControlScopeContext);
+  const runtimePage = React.useContext(RuntimePageContext);
+  const coordinateSpace = React.useContext(RuntimeCoordinateSpaceContext);
+  const sourceControl = control;
+  const sourceTabs = runtimeTabNavigators.get(sourceControl);
+  if (runtimeHiddenControls.has(sourceControl) || sourceControl.properties?.nonVisual === true) return null;
+  control = applyRuntimeControlBindings(sourceControl, runtimeControlState);
+  const style = normalized ? normalizedControlStyle(control) : controlStyle(control, coordinateSpace);
+  if (!normalized && zIndex !== undefined && style.position === "absolute") style.zIndex = zIndex;
+  if (sourceTabs) return <TabTreeNavigator control={control} sourceTabs={sourceTabs} registry={registry} depth={depth} style={style} />;
   if (control.componentRef) {
     const Adapter = registry[control.componentRef];
     return <div style={style} className={"migration-control custom-host" + (normalized ? " normalized-control" : "")} data-kind={control.kind}>
@@ -956,54 +1193,65 @@ function ControlNode({ control, registry, depth, normalized = false, contextName
     </div>;
   }
   const childContextName = control.kind === "GroupBox" || control.kind === "TabPage" ? control.name : contextName;
-  const children = <ControlTree controls={control.children || []} registry={registry} depth={depth + 1} normalized={normalized} contextName={childContextName} />;
+  const childSpace = control.bounds ? { width: control.bounds.width, height: control.bounds.height } : coordinateSpace;
+  const children = <RuntimeCoordinateSpaceContext.Provider value={childSpace}><ControlTree controls={control.children || []} registry={registry} depth={depth + 1} normalized={normalized} contextName={childContextName} /></RuntimeCoordinateSpaceContext.Provider>;
   const text = displayText(control);
   switch (control.kind) {
     case "Button":
     case "ToolStripButton":
     case "ToolStripDropDownButton":
     case "ToolStripSplitButton":
-    case "ToolStripMenuItem": {
-      const iconOnly = normalized && control.kind.startsWith("ToolStrip") && !control.text;
-      const glyph = controlButtonGlyph(control);
-      return <Button style={style} size="small" disabled={control.appearance?.enabled === false} className={iconOnly ? "native-icon-button" : "native-command-button"} title={text + (eventTitle(control) ? "\\n" + eventTitle(control) : "")}>
-        {(controlIconUrl(control) || glyph) && <ControlIcon control={control} className="native-button-glyph" fallback={glyph} />}
-        {!iconOnly && text && <span>{text}</span>}
-      </Button>;
-    }
+    case "ToolStripMenuItem":
+      return <NativeCommandButton control={control} style={style} normalized={normalized} text={text} />;
     case "TextBox":
     case "MaskedTextBox":
     case "ToolStripTextBox": {
       if (control.kind !== "ToolStripTextBox" && control.appearance?.multiline === true) {
-        return <Input.TextArea style={style} className="native-text-area" defaultValue={String(control.text ?? control.properties?.Text ?? "")}
+        return <Input.TextArea style={textAreaStyle(style, control.appearance?.scrollBars)} className="native-text-area" defaultValue={String(control.text ?? control.properties?.Text ?? "")}
           readOnly={control.appearance?.readOnly === true} disabled={control.appearance?.enabled === false}
-          maxLength={control.appearance?.maxLength} wrap={control.appearance?.wordWrap === false ? "off" : "soft"} autoSize={false} />;
+          placeholder={control.appearance?.placeholderText} maxLength={control.appearance?.maxLength}
+          wrap={control.appearance?.wordWrap === false ? "off" : "soft"} autoSize={false} />;
       }
       return <Input style={style} size="small" type={control.appearance?.passwordChar ? "password" : "text"}
         defaultValue={String(control.text ?? control.properties?.Text ?? "")} readOnly={control.appearance?.readOnly === true}
-        disabled={control.appearance?.enabled === false} maxLength={control.appearance?.maxLength} />;
+        disabled={control.appearance?.enabled === false} placeholder={control.appearance?.placeholderText}
+        maxLength={control.appearance?.maxLength} />;
     }
     case "RichTextBox":
       return <Input.TextArea style={style} className="native-commit-editor" defaultValue={String(control.text ?? control.properties?.Text ?? "")}
-        placeholder={contextName === "Message" ? "Enter commit message" : undefined} readOnly={control.appearance?.readOnly === true}
+        placeholder={control.appearance?.placeholderText || (contextName === "Message" ? "Enter commit message" : undefined)} readOnly={control.appearance?.readOnly === true}
         disabled={control.appearance?.enabled === false} maxLength={control.appearance?.maxLength} autoSize={false} />;
     case "NumericUpDown":
-      return <InputNumber style={style} size="small" min={control.appearance?.minimum} max={control.appearance?.maximum}
+      return <InputNumber style={style} className="native-number-input" size="small" min={control.appearance?.minimum} max={control.appearance?.maximum}
         defaultValue={control.appearance?.value} disabled={control.appearance?.enabled === false} />;
     case "ComboBox":
     case "DomainUpDown":
-    case "ToolStripComboBox":
-      return <Select style={style} size="small" disabled={control.appearance?.enabled === false}
-        defaultValue={control.appearance?.selectedIndex >= 0 ? control.items?.[control.appearance.selectedIndex] : undefined}
+    case "ToolStripComboBox": {
+      const editable = control.kind === "ComboBox" && control.appearance?.dropDownStyle !== "DropDownList";
+      const comboClass = (controlUsesVisualProfile(control, "opendental", "ComboBox") ? "native-od-combo " : "")
+        + (editable ? "native-editable-combo" : "native-list-combo");
+      const selectedItem = control.appearance?.selectedIndex >= 0 ? control.items?.[control.appearance.selectedIndex] : undefined;
+      return <Select style={style} size="small" className={comboClass} disabled={control.appearance?.enabled === false}
+        showSearch={editable} optionFilterProp="label" notFoundContent={null}
+        defaultValue={selectedItem ?? (control.text ? String(control.text) : undefined)}
         options={(control.items || []).map((item: string) => ({ label: item, value: item }))} />;
+    }
     case "CheckBox":
+      if (controlUsesVisualProfile(control, "opendental", "CheckBox")) {
+        const ProfileVisual = profileVisualComponent(control);
+        if (ProfileVisual) return <ProfileVisual control={control} style={style} text={text} />;
+      }
       return <div style={style} className={"migration-check" + (control.appearance?.checkAlign?.horizontal === "Right" ? " check-right" : "")}>
-        <Checkbox disabled={control.appearance?.enabled === false} defaultChecked={control.appearance?.checked}>{text}</Checkbox></div>;
+        <Checkbox disabled={control.appearance?.enabled === false} checked={runtimeControlState.getValue(control.name, "checked", control, runtimeControlScope)}
+          onChange={(event) => runtimeControlState.setValue(control.name, "checked", event.target.checked, runtimeControlScope)}>{text}</Checkbox></div>;
     case "RadioButton":
       return <div style={style} className={"migration-check migration-radio" + (control.appearance?.checkAlign?.horizontal === "Right" ? " check-right" : "")}><Radio name={contextName || "wf-radio-group"}
-        disabled={control.appearance?.enabled === false} defaultChecked={control.appearance?.checked}>{text}</Radio></div>;
-    case "Label":
+        disabled={control.appearance?.enabled === false} defaultChecked={runtimeControlState.getValue(control.name, "checked", control, runtimeControlScope)}
+        onChange={(event) => runtimeControlState.setValue(control.name, "checked", event.target.checked, runtimeControlScope)}>{text}</Radio></div>;
     case "LinkLabel":
+      return <button type="button" style={style} className="migration-link-label" disabled={control.appearance?.enabled === false}
+        title={eventTitle(control)}>{text}</button>;
+    case "Label":
     case "ToolStripLabel":
     case "ToolStripStatusLabel":
       return <span style={style} className="migration-label">{text}</span>;
@@ -1012,15 +1260,22 @@ function ControlNode({ control, registry, depth, normalized = false, contextName
     case "ToolStripProgressBar":
       return <div style={style} className="migration-progress"><span /></div>;
     case "TreeView":
-      return <FileStatusPreview control={control} contextName={contextName} style={style} />;
+      return pageUsesVisualProfile(runtimePage, "gitextensions-workspace")
+        ? <FileStatusPreview control={control} contextName={contextName} style={style} />
+        : <NativeTreeView control={control} style={style} />;
     case "ListBox":
       return <NativeListBox control={control} style={style} />;
     case "DataGridView":
-    case "ListView":
-      return <div style={style} className="migration-grid">
-        <div className="migration-grid-head">{(control.columns || []).map((column: any) => <span key={column.name}>{column.headerText || column.name}</span>)}</div>
-        <div className="migration-grid-empty">{text} · 数据契约待接入</div>
+    case "ListView": {
+      const defaultColumnWidth = control.kind === "ListView" ? 60 : 100;
+      return <div style={style} className={"migration-grid native-" + control.kind.toLowerCase()}>
+        {(control.columns || []).length > 0 && <div className="migration-grid-head">{(control.columns || []).map((column: any) => <span key={column.name}
+          style={{ flex: "0 0 " + Math.max(24, Number(column.width || defaultColumnWidth)) + "px" }}>{column.headerText || column.name}</span>)}</div>}
+        <div className="migration-grid-empty" aria-label="Empty data view" />
       </div>;
+    }
+    case "PropertyGrid":
+      return <NativePropertyGrid control={control} style={style} />;
     case "Panel":
     case "GroupBox":
     case "TabPage":
@@ -1028,7 +1283,7 @@ function ControlNode({ control, registry, depth, normalized = false, contextName
     case "TableLayoutPanel":
     case "FlowLayoutPanel":
     case "ToolStripContainer":
-      return <div style={style} className={"migration-container kind-" + control.kind.toLowerCase()}>
+      return <div style={style} className={"migration-container kind-" + control.kind.toLowerCase() + (controlUsesVisualProfile(control, "opendental", "GroupBox") ? " native-od-groupbox" : "")}>
         {control.kind === "GroupBox" && <span className="migration-container-title">{text}</span>}
         {children}
       </div>;
@@ -1063,9 +1318,78 @@ function AbsoluteTabControl({ control, registry, depth, style }: { control: Cont
     window.requestAnimationFrame(() => (tabsRef.current?.querySelectorAll("button")[next] as HTMLButtonElement | undefined)?.focus());
   };
   const page = pages[active];
-  return <div style={style} className="native-tabs native-absolute-tabs" data-control={control.name}>
-    <div ref={tabsRef} className="native-tab-list" role="tablist">{pages.map((item: Control, pageIndex: number) => <button type="button" role="tab" tabIndex={active === pageIndex ? 0 : -1} aria-selected={active === pageIndex} className={active === pageIndex ? "active" : ""} key={item.name} onClick={() => setActive(pageIndex)} onKeyDown={(event) => keyboardTab(event, pageIndex)}>{displayText(item) || "Tab " + (pageIndex + 1)}</button>)}</div>
-    <div className="native-tab-page native-absolute-tab-page" role="tabpanel">{page && <ControlTree controls={page.children || []} registry={registry} depth={depth + 1} contextName={page.name} />}</div>
+  return <div style={style} className={"native-tabs native-absolute-tabs" + (control.appearance?.multiline === true ? " native-multiline-tabs" : "") + (controlUsesVisualProfile(control, "opendental", "TabControl") ? " native-od-tabs" : "")} data-control={control.name}>
+    <div ref={tabsRef} className="native-tab-list" role="tablist">{pages.map((item: Control, pageIndex: number) => <button type="button" role="tab" disabled={item.appearance?.enabled === false} tabIndex={active === pageIndex ? 0 : -1} aria-selected={active === pageIndex} className={active === pageIndex ? "active" : ""} key={item.name} onClick={() => item.appearance?.enabled !== false && setActive(pageIndex)} onKeyDown={(event) => keyboardTab(event, pageIndex)}>{displayText(item) || "Tab " + (pageIndex + 1)}</button>)}</div>
+    <div className="native-tab-page native-absolute-tab-page" role="tabpanel">{page && <RuntimeCoordinateSpaceContext.Provider value={{ width: page.bounds?.width, height: page.bounds?.height }}><ControlTree controls={page.children || []} registry={registry} depth={depth + 1} contextName={page.name} /></RuntimeCoordinateSpaceContext.Provider>}</div>
+  </div>;
+}
+
+type TabTreeNode = { page: Control; children: TabTreeNode[] };
+type FlatTabTreeNode = TabTreeNode & { level: number; parent?: TabTreeNode };
+
+function tabTreeNodes(tabControl: Control): TabTreeNode[] {
+  return (tabControl.children || []).filter((child: Control) => child.kind === "TabPage").map((page: Control) => ({
+    page,
+    children: (page.children || []).filter((child: Control) => child.kind === "TabControl").flatMap((child: Control) => tabTreeNodes(child)),
+  }));
+}
+
+function flattenTabTree(nodes: TabTreeNode[], level = 1, parent?: TabTreeNode): FlatTabTreeNode[] {
+  return nodes.flatMap((node) => [{ ...node, level, parent }, ...flattenTabTree(node.children, level + 1, node)]);
+}
+
+function firstTabLeaf(node?: TabTreeNode): TabTreeNode | undefined {
+  return node?.children.length ? firstTabLeaf(node.children[0]) : node;
+}
+
+function TabTreeNavigator({ control, sourceTabs, registry, depth, style }: { control: Control; sourceTabs: Control; registry: Record<string, React.ComponentType<DefinitionAdapterProps>>; depth: number; style: React.CSSProperties }) {
+  const roots = tabTreeNodes(sourceTabs);
+  const flat = flattenTabTree(roots);
+  const sourceIndex = Math.max(0, Math.min(roots.length - 1, Number(sourceTabs.appearance?.selectedIndex || 0)));
+  const autoSelectChild = control.properties?.AutoSelectChild !== false;
+  const initial = autoSelectChild ? firstTabLeaf(roots[sourceIndex] || roots[0]) : roots[sourceIndex] || roots[0];
+  const [selectedName, setSelectedName] = React.useState(initial?.page.name || "");
+  const selectedEntry = flat.find((item) => item.page.name === selectedName) || flat[0];
+  const selectedPage = selectedEntry?.page;
+  const selectedPageStyle: React.CSSProperties = {
+    ...(selectedPage?.appearance?.backColor?.cssColor ? { background: selectedPage.appearance.backColor.cssColor } : {}),
+    ...(selectedPage?.appearance?.foreColor?.cssColor ? { color: selectedPage.appearance.foreColor.cssColor } : {}),
+  };
+  const treeWidth = Math.max(120, Math.min(420, Number(control.properties?.TreeViewSize || 220)));
+  const host = React.useRef<HTMLDivElement>(null);
+  const selectNode = (node: TabTreeNode, focus = false) => {
+    const target = autoSelectChild ? firstTabLeaf(node) || node : node;
+    setSelectedName(target.page.name);
+    if (focus) window.requestAnimationFrame(() => (host.current?.querySelector('[data-tab-tree-name="' + target.page.name + '"]') as HTMLButtonElement | null)?.focus());
+  };
+  const keyboardTree = (event: React.KeyboardEvent<HTMLButtonElement>, item: FlatTabTreeNode, itemIndex: number) => {
+    let next: FlatTabTreeNode | undefined;
+    if (event.key === "ArrowDown") next = flat[Math.min(flat.length - 1, itemIndex + 1)];
+    else if (event.key === "ArrowUp") next = flat[Math.max(0, itemIndex - 1)];
+    else if (event.key === "Home") next = flat[0];
+    else if (event.key === "End") next = flat[flat.length - 1];
+    else if (event.key === "ArrowRight" && item.children.length) next = { ...item.children[0], level: item.level + 1, parent: item };
+    else if (event.key === "ArrowLeft" && item.parent) next = flat.find((entry) => entry.page.name === item.parent?.page.name);
+    else return;
+    if (!next) return;
+    event.preventDefault();
+    selectNode(next, true);
+  };
+  return <div ref={host} style={{ ...style, gridTemplateColumns: treeWidth + "px 1px minmax(0, 1fr)" }} className="native-tab-tree-navigator" data-control={control.name}>
+    <div className="native-tab-tree-nav" role="tree" aria-label={displayText(control) || humanizeType(control.name)}>
+      {flat.map((item, itemIndex) => { const iconControl = item.page.appearance?.imageKey || item.page.appearance?.image ? item.page : control; return <button type="button" role="treeitem" aria-level={item.level} aria-expanded={item.children.length ? true : undefined}
+        aria-selected={selectedEntry?.page.name === item.page.name} tabIndex={selectedEntry?.page.name === item.page.name ? 0 : -1}
+        className={"native-tab-tree-item" + (selectedEntry?.page.name === item.page.name ? " selected" : "")}
+        data-tab-tree-name={item.page.name} key={item.page.name} style={{ paddingLeft: 8 + (item.level - 1) * 18 }}
+        onClick={() => selectNode(item)} onKeyDown={(event) => keyboardTree(event, item, itemIndex)}>
+        {controlIconUrl(iconControl) && <ControlIcon control={iconControl} className="native-tab-tree-icon" />}
+        <span>{displayText(item.page) || humanizeType(item.page.name.replace(/^tp/i, ""))}</span>
+      </button>; })}
+    </div>
+    <div className="native-tab-tree-separator" />
+    <div className="native-tab-tree-page" style={selectedPageStyle} role="tabpanel" aria-label={selectedPage ? displayText(selectedPage) || humanizeType(selectedPage.name) : undefined}>
+      {selectedPage && <RuntimeCoordinateSpaceContext.Provider value={{ width: selectedPage.bounds?.width, height: selectedPage.bounds?.height }}><ControlTree controls={(selectedPage.children || []).filter((child: Control) => child.kind !== "TabControl")} registry={registry} depth={depth + 1} contextName={selectedPage.name} /></RuntimeCoordinateSpaceContext.Provider>}
+    </div>
   </div>;
 }
 
@@ -1084,11 +1408,105 @@ function NativeListBox({ control, style }: { control: Control; style: React.CSSP
     event.preventDefault();
     setSelected(next);
   };
-  return <div style={style} className={"migration-list native-list-box" + (control.appearance?.enabled === false ? " disabled" : "")}
+  return <div style={style} className={"migration-list native-list-box" + (controlUsesVisualProfile(control, "opendental", "ListBox") ? " native-od-list-box" : "") + (control.appearance?.enabled === false ? " disabled" : "")}
     role="listbox" aria-disabled={control.appearance?.enabled === false} tabIndex={control.appearance?.enabled === false ? -1 : 0} onKeyDown={moveSelection}>
     {items.map((item, index) => <div key={index} role="option" aria-selected={selected === index}
       className={"native-list-box-item" + (selected === index ? " selected" : "")}
       onClick={() => control.appearance?.enabled !== false && setSelected(index)}>{item}</div>)}
+  </div>;
+}
+
+function NativePropertyGrid({ control, style }: { control: Control; style: React.CSSProperties }) {
+  const showToolbar = control.properties?.ToolbarVisible !== false;
+  const showHelp = control.properties?.HelpVisible !== false;
+  const fields = (control.propertyGridSource?.fields || []) as any[];
+  const categorized = /Categorized/i.test(String(control.properties?.PropertySort || "CategorizedAlphabetical"));
+  const [selected, setSelected] = React.useState(0);
+  const [values, setValues] = React.useState<Record<string, string | number | boolean>>(() => Object.fromEntries(
+    fields.filter((field) => field.defaultValue !== undefined).map((field) => [field.name, field.defaultValue]),
+  ));
+  const selectedField = fields[selected];
+  const rows: Array<{ category?: string; field?: any }> = [];
+  let previousCategory = "";
+  fields.forEach((field) => {
+    const category = String(field.category || "Misc");
+    if (categorized && category !== previousCategory) rows.push({ category });
+    rows.push({ field });
+    previousCategory = category;
+  });
+  return <div style={style} className={"native-property-grid" + (control.appearance?.enabled === false ? " disabled" : "")}>
+    {showToolbar && <div className="native-property-grid-toolbar" aria-label="Property grid toolbar">
+      <button type="button" className={categorized ? "active" : ""} title="Categorized" aria-label="Categorized"><span aria-hidden="true">▦</span></button>
+      <button type="button" className={!categorized ? "active" : ""} title="Alphabetical" aria-label="Alphabetical"><span aria-hidden="true">A↕</span></button>
+      <span className="native-property-grid-toolbar-separator" />
+      <button type="button" title="Property pages" aria-label="Property pages"><span aria-hidden="true">▤</span></button>
+    </div>}
+    <div className="native-property-grid-body" aria-label="Property values">
+      {rows.map((row) => row.category
+        ? <div className="native-property-grid-category" key={"category-" + row.category}><span aria-hidden="true">−</span>{row.category}</div>
+        : (() => {
+          const field = row.field;
+          const fieldIndex = fields.indexOf(field);
+          const boolField = /(?:^|\.)bool\??$/i.test(String(field.typeName));
+          const choiceField = !boolField && !/(?:^|\.)(?:string|char|s?byte|u?short|u?int|u?long|float|double|decimal|DateTime)\??$/i.test(String(field.typeName));
+          const value = values[field.name] ?? "";
+          const disabled = control.appearance?.enabled === false || field.readOnly === true;
+          return <div className={"native-property-grid-row" + (selected === fieldIndex ? " selected" : "")} key={field.name}
+            title={field.description || field.label} onClick={() => setSelected(fieldIndex)}>
+            <button type="button" className="native-property-grid-name" disabled={control.appearance?.enabled === false}
+              onFocus={() => setSelected(fieldIndex)}>{field.label}</button>
+            <span className="native-property-grid-value">
+              {boolField
+                ? <input type="checkbox" aria-label={field.label} checked={value === true} disabled={disabled}
+                    onChange={(event) => setValues((current) => ({ ...current, [field.name]: event.target.checked }))} />
+                : <input type={field.password ? "password" : "text"} aria-label={field.label} value={String(value)} readOnly={disabled}
+                    onFocus={() => setSelected(fieldIndex)} onChange={(event) => setValues((current) => ({ ...current, [field.name]: event.target.value }))} />}
+              {choiceField && <button type="button" className="native-property-grid-drop" disabled={disabled} aria-label={"Choose " + field.label}>▾</button>}
+              {field.hasEditor && <button type="button" className="native-property-grid-editor" disabled={disabled} aria-label={"Edit " + field.label}>…</button>}
+            </span>
+          </div>;
+        })())}
+    </div>
+    {showHelp && <div className="native-property-grid-help" aria-live="polite"><strong>{selectedField?.label || ""}</strong><span>{selectedField?.description || ""}</span></div>}
+  </div>;
+}
+
+type FlatNativeTreeNode = { name: string; text: string; level: number; hasChildren: boolean };
+
+function flattenNativeTree(control: Control): FlatNativeTreeNode[] {
+  const children = control.treeNodeChildren || {};
+  const texts = control.treeNodeTexts || {};
+  const visit = (names: string[], level: number): FlatNativeTreeNode[] => names.flatMap((name) => {
+    const childNames = children[name] || [];
+    return [{ name, text: texts[name] || name, level, hasChildren: childNames.length > 0 }, ...visit(childNames, level + 1)];
+  });
+  return visit(control.treeRootNodes || [], 1);
+}
+
+function NativeTreeView({ control, style }: { control: Control; style: React.CSSProperties }) {
+  const items = flattenNativeTree(control);
+  const [selected, setSelected] = React.useState(items[0]?.name || "");
+  const host = React.useRef<HTMLDivElement>(null);
+  const moveSelection = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+    let next = index;
+    if (event.key === "ArrowDown") next = Math.min(items.length - 1, index + 1);
+    else if (event.key === "ArrowUp") next = Math.max(0, index - 1);
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = Math.max(0, items.length - 1);
+    else return;
+    event.preventDefault();
+    const item = items[next];
+    if (!item) return;
+    setSelected(item.name);
+    window.requestAnimationFrame(() => (host.current?.querySelector('[data-tree-name="' + item.name + '"]') as HTMLButtonElement | null)?.focus());
+  };
+  return <div ref={host} style={style} className={"native-generic-tree" + (control.appearance?.enabled === false ? " disabled" : "")} role="tree" aria-disabled={control.appearance?.enabled === false}>
+    {items.map((item, index) => <button type="button" role="treeitem" aria-level={item.level} aria-expanded={item.hasChildren ? true : undefined}
+      aria-selected={selected === item.name} disabled={control.appearance?.enabled === false} tabIndex={selected === item.name ? 0 : -1}
+      className={"native-generic-tree-row" + (selected === item.name ? " selected" : "")} data-tree-name={item.name} key={item.name}
+      style={{ paddingLeft: 4 + (item.level - 1) * 18 }} onClick={() => setSelected(item.name)} onKeyDown={(event) => moveSelection(event, index)}>
+      <span className="native-generic-tree-expander" aria-hidden="true">{item.hasChildren ? "▾" : ""}</span><span>{item.text}</span>
+    </button>)}
   </div>;
 }
 
@@ -1129,15 +1547,76 @@ function compactToolbarControls(controls: Control[]): Control[] {
   return preferred.slice(0, 10);
 }
 
-function controlStyle(control: Control): React.CSSProperties {
-  const bounds = control.bounds;
+function controlStyle(control: Control, coordinateSpace: RuntimeCoordinateSpace = {}): React.CSSProperties {
+  const bounds = control.bounds || (control.dock ? { x: 0, y: 0, width: 0, height: 0 } : undefined);
   const style: React.CSSProperties = bounds
     ? { position: "absolute", left: bounds.x, top: bounds.y, width: Math.max(bounds.width, 1), height: Math.max(bounds.height, 1) }
     : { position: "relative" };
+  if (bounds) applyWinFormsEdges(style, control, bounds, coordinateSpace);
+  if (bounds) applyWinFormsAutoSize(style, control, bounds);
   if (control.appearance?.visible === false) style.display = "none";
   if (control.appearance?.backColor?.cssColor) style.background = control.appearance.backColor.cssColor;
   if (control.appearance?.foreColor?.cssColor) style.color = control.appearance.foreColor.cssColor;
   return applyAppearanceStyle(style, control);
+}
+
+function applyWinFormsAutoSize(style: React.CSSProperties, control: Control, bounds: { width: number; height: number }) {
+  if (control.autoSize !== true || control.dock || !["Label", "LinkLabel", "CheckBox", "RadioButton", "Button"].includes(control.kind)) return;
+  // An empty design-time Label commonly has width 0 and receives text from a
+  // constructor/property setter. WinForms recomputes its PreferredSize;
+  // retaining the parsed zero-width box would hide the proven runtime text.
+  if (bounds.width <= 1) {
+    style.width = "max-content";
+    style.minWidth = 0;
+  }
+  if (bounds.height <= 1) {
+    style.height = "max-content";
+    style.minHeight = 0;
+  }
+}
+
+function applyWinFormsEdges(style: React.CSSProperties, control: Control, bounds: { x: number; y: number; width: number; height: number }, space: RuntimeCoordinateSpace) {
+  const sourceWidth = Number(space.width);
+  const sourceHeight = Number(space.height);
+  const hasWidth = Number.isFinite(sourceWidth) && sourceWidth > 0;
+  const hasHeight = Number.isFinite(sourceHeight) && sourceHeight > 0;
+  const right = hasWidth ? sourceWidth - bounds.x - bounds.width : undefined;
+  const bottom = hasHeight ? sourceHeight - bounds.y - bounds.height : undefined;
+  const dock = String(control.dock || "");
+  if (dock === "Fill") {
+    style.left = bounds.x;
+    style.top = bounds.y;
+    if (right !== undefined) { style.right = right; delete style.width; }
+    if (bottom !== undefined) { style.bottom = bottom; delete style.height; }
+    return;
+  }
+  if (dock === "Top" || dock === "Bottom") {
+    style.left = bounds.x;
+    if (right !== undefined) { style.right = right; delete style.width; }
+    if (dock === "Bottom" && bottom !== undefined) { style.bottom = bottom; delete style.top; }
+    return;
+  }
+  if (dock === "Left" || dock === "Right") {
+    style.top = bounds.y;
+    if (bottom !== undefined) { style.bottom = bottom; delete style.height; }
+    if (dock === "Right" && right !== undefined) { style.right = right; delete style.left; }
+    return;
+  }
+  const anchors = new Set((control.anchor || []).map(String));
+  if (anchors.has("Left") && anchors.has("Right") && right !== undefined) {
+    style.right = right;
+    delete style.width;
+  } else if (!anchors.has("Left") && anchors.has("Right") && right !== undefined) {
+    style.right = right;
+    delete style.left;
+  }
+  if (anchors.has("Top") && anchors.has("Bottom") && bottom !== undefined) {
+    style.bottom = bottom;
+    delete style.height;
+  } else if (!anchors.has("Top") && anchors.has("Bottom") && bottom !== undefined) {
+    style.bottom = bottom;
+    delete style.top;
+  }
 }
 
 function normalizedControlStyle(control: Control): React.CSSProperties {
@@ -1175,8 +1654,37 @@ function applyAppearanceStyle(style: React.CSSProperties, control: Control): Rea
   if (/Top/i.test(vertical)) style.alignItems = "flex-start";
   if (/Middle/i.test(vertical)) style.alignItems = "center";
   if (/Bottom/i.test(vertical)) style.alignItems = "flex-end";
+  if (appearance.borderStyle === "FixedSingle") style.border = "1px solid #a0a0a0";
+  if (appearance.borderStyle === "Fixed3D") style.border = "2px inset #c0c0c0";
+  if (appearance.borderStyle === "None") style.border = "0";
+  if (appearance.padding) {
+    const padding = appearance.padding;
+    style.padding = Number(padding.top || 0) + "px " + Number(padding.right || 0) + "px "
+      + Number(padding.bottom || 0) + "px " + Number(padding.left || 0) + "px";
+  }
+  if (Number(appearance.minimumSize?.width) > 0) style.minWidth = Number(appearance.minimumSize.width);
+  if (Number(appearance.minimumSize?.height) > 0) style.minHeight = Number(appearance.minimumSize.height);
+  if (Number(appearance.maximumSize?.width) > 0) style.maxWidth = Number(appearance.maximumSize.width);
+  if (Number(appearance.maximumSize?.height) > 0) style.maxHeight = Number(appearance.maximumSize.height);
   if (appearance.rightToLeft === true || appearance.rightToLeft === "Yes") style.direction = "rtl";
   return style;
+}
+
+function textAreaStyle(style: React.CSSProperties, scrollBars: unknown): React.CSSProperties {
+  const mode = String(scrollBars || "Both");
+  if (mode === "None") return { ...style, overflowX: "hidden", overflowY: "hidden" };
+  if (mode === "Horizontal") return { ...style, overflowX: "auto", overflowY: "hidden" };
+  if (mode === "Vertical") return { ...style, overflowX: "hidden", overflowY: "auto" };
+  return { ...style, overflowX: "auto", overflowY: "auto" };
+}
+
+function buttonImageAlignmentClass(control: Control): string {
+  const alignment = control.appearance?.imageAlign;
+  if (!alignment) return "";
+  if (alignment.vertical === "Top") return " native-button-image-top";
+  if (alignment.vertical === "Bottom") return " native-button-image-bottom";
+  if (alignment.horizontal === "Right") return " native-button-image-right";
+  return " native-button-image-left";
 }
 
 function eventTitle(control: Control): string {
@@ -1322,6 +1830,9 @@ body { margin: 0; background: #f4f6f8; color: #172033; font-family: Inter, ui-sa
 .native-fixed-form .ant-input[readonly], .native-fixed-form .ant-input.ant-input-disabled, .native-fixed-form .ant-input-number-disabled, .native-fixed-form .ant-select-disabled .ant-select-selector { color: #555 !important; background: #f0f0f0 !important; }
 .native-fixed-form .ant-select, .native-fixed-form .ant-select-selector { min-height: 0 !important; height: 100% !important; }
 .native-fixed-form .ant-select-selection-item { line-height: normal !important; }
+.native-fixed-form .native-editable-combo .ant-select-selector { cursor: text !important; }
+.native-fixed-form .native-list-combo .ant-select-selector { cursor: default !important; }
+.native-fixed-form .native-number-input .ant-input-number-input { text-align: inherit; }
 .native-fixed-form .native-text-area.ant-input { resize: none; overflow: auto; }
 .native-fixed-form :is(.migration-label,.migration-check) { min-height: 0; padding: 0; line-height: normal; }
 .native-fixed-form :is(.ant-checkbox-wrapper,.ant-radio-wrapper) { display: flex; align-items: center; height: 100%; }
@@ -1336,28 +1847,12 @@ body { margin: 0; background: #f4f6f8; color: #172033; font-family: Inter, ui-sa
 .native-fixed-form .ant-radio-checked .ant-radio-inner::after { transform: scale(.55); background: #111; }
 .native-fixed-form .native-absolute-tabs { background: #f0f0f0; }
 .native-fixed-form .native-absolute-tabs .native-tab-list { flex: 0 0 20px; height: 20px; padding: 1px 2px 0; background: #f0f0f0; }
+.native-fixed-form .native-absolute-tabs.native-multiline-tabs .native-tab-list { flex: 0 0 auto; align-content: flex-end; flex-wrap: wrap; min-height: 20px; height: auto; overflow: hidden; }
 .native-fixed-form .native-absolute-tabs .native-tab-list button { height: 19px; padding: 0 6px; line-height: normal; }
 .native-fixed-form .native-absolute-tabs .native-tab-list button.active { height: 20px; }
 .native-fixed-form .native-absolute-tab-page { margin: 0 1px 1px; background: #f0f0f0; }
 .native-fixed-form .kind-groupbox { border-color: #8e8e8e; background: var(--wf-control-surface); }
 .native-fixed-form .migration-container-title { background: var(--wf-control-surface); font: inherit; }
-.native-od-form { font: 11px "Microsoft Sans Serif","Segoe UI",sans-serif; }
-.native-od-form .migration-canvas { border: 1px solid #000; background: #415e9a; }
-.native-od-form .native-od-titlebar { position: relative; z-index: 4; flex: 0 0 25px; height: 25px; gap: 5px; padding-left: 4px; overflow: visible; color: #fff; background: #415e9a; border: 0; font: 11px "Microsoft Sans Serif","Segoe UI",sans-serif; }
-.native-od-form .native-od-titlebar .native-app-icon { flex-basis: 20px; width: 20px; height: 20px; margin-top: 1px; }
-.native-od-form .native-od-titlebar .native-app-icon img { width: 20px; height: 20px; }
-.native-od-form .native-od-titlebar .native-window-buttons { position: absolute; z-index: 5; top: 4px; right: 14px; height: 25px; margin: 0; }
-.native-od-form .native-od-titlebar .native-window-buttons button { position: relative; width: 30px; height: 25px; color: #fff; background: transparent; font: 12px "Microsoft Sans Serif","Segoe UI",sans-serif; }
-.native-od-form .native-od-titlebar .native-window-buttons button:hover { color: #fff; background: #6880a3; }
-.native-od-form .native-od-titlebar .native-window-buttons button[aria-label="Close"] { color: transparent; font-size: 0; }
-.native-od-form .native-od-titlebar .native-window-buttons button[aria-label="Close"]:hover { background: #e81123; }
-.native-od-form .native-od-titlebar .native-window-buttons button[aria-label="Close"]::before,
-.native-od-form .native-od-titlebar .native-window-buttons button[aria-label="Close"]::after { position: absolute; top: 12px; left: 9px; width: 13px; height: 1.5px; content: ""; background: #fff; transform: rotate(45deg); }
-.native-od-form .native-od-titlebar .native-window-buttons button[aria-label="Close"]::after { transform: rotate(-45deg); }
-.native-od-form .native-window-body { padding: 0 4px 4px; background: #415e9a; }
-.native-od-form .native-fixed-client { background: #fcfdfe; --wf-control-surface: #fcfdfe; }
-.native-od-form .native-absolute-tab-page { --wf-control-surface: #f0f0f0; }
-.native-od-form :is(.migration-label,.migration-check,.native-command-button.ant-btn,.native-icon-button.ant-btn,.migration-list,.native-tabs) { font: inherit; }
 .native-command-toast { position: absolute; z-index: 80; right: 12px; bottom: 12px; display: grid; grid-template-columns: auto minmax(130px,1fr); gap: 2px 8px; min-width: 270px; max-width: 420px; padding: 7px 10px; color: #253242; background: #f9fbfd; border: 1px solid #8798aa; box-shadow: 2px 4px 12px rgba(0,0,0,.28); font: 11px "Segoe UI",sans-serif; }
 .native-command-toast strong { color: #2365a3; }
 .native-command-toast small { grid-column: 1 / -1; color: #6f7d8c; }
@@ -1409,22 +1904,60 @@ body { margin: 0; background: #f4f6f8; color: #172033; font-family: Inter, ui-sa
 .native-absolute-tabs { position: absolute; }
 .native-absolute-tabs .native-tab-list button { min-width: 0; padding-right: 10px; padding-left: 10px; }
 .native-absolute-tab-page { position: relative; padding: 0; }
+.native-tab-tree-navigator { display: grid; overflow: hidden; color: #202020; background: #f0f0f0; font: 13px "Microsoft Sans Serif","Segoe UI",sans-serif; }
+.native-tab-tree-nav { min-width: 0; padding: 8px 0; overflow: auto; background: #fff; }
+.native-tab-tree-item { display: flex; align-items: center; width: 100%; min-height: 25px; padding-top: 2px; padding-right: 7px; padding-bottom: 2px; overflow: hidden; color: inherit; text-align: left; white-space: nowrap; border: 0; background: transparent; font: inherit; cursor: default; }
+.native-tab-tree-item:hover { background: #e5f0fb; }
+.native-tab-tree-item:focus { outline: 1px dotted #111; outline-offset: -2px; }
+.native-tab-tree-item.selected { color: #fff; background: #0078d7; }
+.native-tab-tree-icon { display: inline-grid; flex: 0 0 16px; width: 16px; height: 16px; margin-right: 5px; place-items: center; }
+.native-tab-tree-icon img { display: block; width: 16px; height: 16px; object-fit: contain; }
+.native-tab-tree-item > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.native-tab-tree-separator { background: #a0a0a0; box-shadow: 1px 0 #fff; }
+.native-tab-tree-page { position: relative; min-width: 0; min-height: 0; overflow: hidden; background: #f0f0f0; }
 .migration-control, .migration-container, .migration-grid { overflow: hidden; }
 .migration-container { position: absolute; border: 1px solid #aeb5bd; background: #f3f3f3; }
 .kind-panel, .kind-flowlayoutpanel, .kind-tablelayoutpanel { border-color: transparent; background: transparent; }
 .migration-container-title { position: absolute; top: -1px; left: 8px; z-index: 2; background: white; padding: 0 4px; font-size: 11px; }
 .migration-label { display: flex; align-items: center; min-height: 18px; padding: 0 3px; overflow: hidden; white-space: nowrap; font: 11px "Segoe UI", sans-serif; }
+.migration-link-label { display: flex; align-items: center; min-height: 0; padding: 0; overflow: hidden; color: #0000ff; text-align: left; text-decoration: underline; text-overflow: clip; white-space: nowrap; border: 0; background: transparent; font: inherit; cursor: pointer; }
+.migration-link-label:hover, .migration-link-label:focus-visible { color: #ff0000; }
+.migration-link-label:disabled { color: #6d6d6d; cursor: default; }
 .migration-check { display: flex; align-items: center; min-height: 21px; font: 11px "Segoe UI", sans-serif; }
 .migration-strip { position: absolute; display: flex; align-items: center; gap: 2px; overflow: hidden; padding: 1px 3px; background: #ededed; border: 1px solid #b0b7bf; }
 .migration-strip.normalized-strip { position: relative; inset: auto; width: 100% !important; height: 100% !important; padding: 1px 5px; border: 0; }
-.migration-grid { border: 1px solid #aeb6bf; background: white; }
-.migration-grid-head { display: flex; min-height: 24px; background: #ededed; border-bottom: 1px solid #b8bec5; }
-.migration-grid-head span { min-width: 100px; padding: 4px 7px; font-size: 11px; border-right: 1px solid #c5cad0; }
-.migration-grid-empty { padding: 16px; color: #8a94a6; text-align: center; font-size: 11px; }
+.migration-grid { display: flex; flex-direction: column; border: 1px solid #7a7a7a; background: white; }
+.migration-grid-head { display: flex; flex: 0 0 23px; min-height: 23px; overflow: hidden; background: linear-gradient(#fafafa,#e5e5e5); border-bottom: 1px solid #a6a6a6; }
+.migration-grid-head span { min-width: 24px; padding: 3px 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; border-right: 1px solid #b8bec5; }
+.migration-grid-empty { flex: 1; min-height: 0; background: #fff; }
+.native-property-grid { display: flex; flex-direction: column; overflow: hidden; color: #000; border: 1px solid #7a7a7a; background: #fff; font: 11px "Microsoft Sans Serif","Segoe UI",sans-serif; }
+.native-property-grid-toolbar { display: flex; flex: 0 0 25px; align-items: center; gap: 1px; min-height: 25px; padding: 1px 2px; border-bottom: 1px solid #a0a0a0; background: #f0f0f0; }
+.native-property-grid-toolbar button { display: grid; width: 22px; height: 21px; padding: 0; color: #202020; border: 1px solid transparent; background: transparent; place-items: center; font: 9px "Segoe UI",sans-serif; }
+.native-property-grid-toolbar button.active { border-color: #8da4bd; background: #dbe9f7; }
+.native-property-grid-toolbar button:hover { border-color: #7da2ce; background: #e5f1fb; }
+.native-property-grid-toolbar-separator { width: 1px; height: 19px; margin: 0 2px; background: #a0a0a0; box-shadow: 1px 0 #fff; }
+.native-property-grid-body { position: relative; flex: 1 1 auto; min-height: 0; overflow: auto; background: inherit; }
+.native-property-grid-category { display: flex; align-items: center; gap: 3px; min-height: 20px; padding: 1px 3px; color: #000; border-bottom: 1px solid #d5d5d5; background: #e6e6e6; font-weight: 700; }
+.native-property-grid-category span { display: grid; width: 9px; height: 9px; place-items: center; border: 1px solid #6f6f6f; background: #fff; font: 8px Arial,sans-serif; }
+.native-property-grid-row { display: grid; grid-template-columns: minmax(90px,44%) minmax(100px,56%); min-height: 20px; color: #000; border-bottom: 1px solid #e0e0e0; background: #fff; }
+.native-property-grid-name { min-width: 0; padding: 2px 4px 2px 15px; overflow: hidden; color: inherit; text-align: left; text-overflow: ellipsis; white-space: nowrap; border: 0; border-right: 1px solid #a0a0a0; background: transparent; font: inherit; }
+.native-property-grid-row.selected .native-property-grid-name { color: #fff; background: #0078d7; }
+.native-property-grid-value { display: flex; min-width: 0; background: #fff; }
+.native-property-grid-value > input[type="text"], .native-property-grid-value > input[type="password"] { flex: 1; min-width: 0; height: 19px; padding: 1px 3px; color: #000; border: 0; outline: 0; background: transparent; font: inherit; }
+.native-property-grid-value > input[readonly] { color: #6d6d6d; background: #f3f3f3; }
+.native-property-grid-value > input[type="checkbox"] { width: 13px; height: 13px; margin: 3px 4px; accent-color: #fff; }
+.native-property-grid-drop, .native-property-grid-editor { flex: 0 0 18px; width: 18px; height: 18px; padding: 0; color: #000; border: 0; border-left: 1px solid #a0a0a0; background: linear-gradient(#fff,#e6e6e6); font: 9px Arial,sans-serif; }
+.native-property-grid-editor { font: 11px "Segoe UI",sans-serif; }
+.native-property-grid-help { flex: 0 0 54px; min-height: 54px; padding: 4px 5px; border-top: 1px solid #a0a0a0; background: #f0f0f0; }
+.native-property-grid-help strong, .native-property-grid-help span { display: block; min-height: 14px; overflow: hidden; text-overflow: ellipsis; }
+.native-property-grid-help strong { white-space: nowrap; }
+.native-property-grid-help span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.native-property-grid.disabled { color: #6d6d6d; background: #f0f0f0; }
 .migration-custom { position: relative; width: 100%; height: 100%; padding: 2px; overflow: hidden; border: 1px solid #b7bec7; background: #f3f3f3; }
 .migration-custom.unresolved { display: flex; flex-direction: column; justify-content: center; align-items: center; color: #5b6d86; }
 .migration-custom.unresolved span { font-size: 10px; }
-.resolved-component { padding: 0; border: 0; background: transparent; }
+.resolved-component { padding: 0; overflow: visible; border: 0; background: transparent; }
+.migration-control.custom-host { overflow: visible; }
 .component-type-tag { display: none; }
 .external-inline { padding: 1px 3px; border: 0; background: #ededed; }
 .native-empty-toolbar { display: flex; align-items: center; height: 25px; color: #7b8490; font: 10px "Segoe UI",sans-serif; }
@@ -1436,12 +1969,34 @@ body { margin: 0; background: #f4f6f8; color: #172033; font-family: Inter, ui-sa
 .semantic-text-input, .semantic-combo-input { display: block; width: 100%; height: 100%; min-height: 20px; padding: 1px 4px; color: inherit; border: 1px solid #8e969e; border-radius: 0; background: #fff; font: inherit; }
 .semantic-text-input.multiline { resize: none; }
 .semantic-date-input input:disabled, .semantic-date-input button:disabled, .semantic-text-input:disabled, .semantic-combo-input:disabled, .semantic-text-input[readonly] { color: #555; background: #f0f0f0; }
-.semantic-warning-indicator { display: grid; width: 100%; height: 100%; place-items: center; color: #fff; border: 1px solid #b26c00; border-radius: 50%; background: #f0a000; font: bold 11px "Segoe UI",sans-serif; }
+.semantic-warning-indicator { position: relative; display: block; width: 100%; height: 100%; overflow: hidden; color: transparent; border: 0; background: transparent; font-size: 0; }
+.semantic-warning-indicator::before { position: absolute; inset: 1px 0 1px; content: ""; background: #ffc080; clip-path: polygon(50% 0,100% 100%,0 100%); filter: drop-shadow(0 0 1px #ffa500); }
+.semantic-warning-indicator::after { position: absolute; top: 3px; left: 0; width: 100%; content: "!"; color: #fff; text-align: center; font: bold 11px "Microsoft Sans Serif","Segoe UI",sans-serif; }
 .migration-inline-controls { display: flex; align-items: center; gap: 2px; width: 100%; height: 100%; overflow: hidden; }
 .normalized-control { position: relative !important; inset: auto !important; width: 100% !important; height: 100% !important; min-height: 0; }
 .native-command-button.ant-btn, .native-icon-button.ant-btn { height: 23px; padding: 0 7px; border-color: #aeb5bd; border-radius: 2px; background: linear-gradient(#fff,#e9e9e9); box-shadow: none; font: 11px "Segoe UI",sans-serif; }
 .native-icon-button.ant-btn { min-width: 24px; padding: 0 5px; }
+.native-menu-command.ant-btn { display: flex; justify-content: flex-start; gap: 4px; padding-right: 3px; }
+.native-menu-command-arrow { display: grid; align-self: stretch; min-width: 13px; margin-left: auto; place-items: center; border-left: 1px solid #c1c5c9; font-size: 8px; }
+.native-menu-button-host { overflow: visible; }
+.native-menu-button-host > .ant-btn { position: relative; inset: auto; }
+.native-linked-menu { position: absolute; z-index: 1000; top: calc(100% + 1px); left: 0; display: flex; flex-direction: column; padding: 2px; color: #202020; border: 1px solid #979797; background: #f0f0f0; box-shadow: 2px 2px 4px rgba(0,0,0,.24); font: 12px "Segoe UI",sans-serif; }
+.native-linked-menu-item-host { position: relative; display: block; }
+.native-linked-menu-item-host > button { display: flex; align-items: center; gap: 5px; width: 100%; min-height: 22px; padding: 2px 7px; color: inherit; text-align: left; white-space: nowrap; border: 0; background: transparent; font: inherit; }
+.native-linked-menu-item-host > button:hover, .native-linked-menu-item-host > button:focus-visible { color: #000; outline: 0; background: #d9eaf7; }
+.native-linked-menu-item-host > button:disabled { color: #888; background: transparent; }
+.native-linked-menu-label { flex: 1 1 auto; }
+.native-linked-menu-item-host kbd { margin-left: 18px; color: inherit; background: transparent; border: 0; font: inherit; }
+.native-linked-menu-check { flex: 0 0 13px; width: 13px; text-align: center; }
+.native-linked-menu-arrow { margin-left: 10px; font-size: 14px; }
+.native-linked-menu-separator { display: block; height: 1px; margin: 3px 2px; background: #c7c7c7; }
+.native-linked-menu.nested { top: -3px; left: calc(100% - 2px); display: none; }
+.native-linked-menu-item-host:hover > .native-linked-menu.nested, .native-linked-menu-item-host:focus-within > .native-linked-menu.nested { display: flex; }
 .native-button-glyph { display: inline-block; min-width: 12px; color: #2867b2; font-weight: 700; }
+.native-button-image-right .native-button-glyph { order: 2; margin-left: 3px; }
+.native-button-image-top.ant-btn { flex-direction: column; gap: 0; }
+.native-button-image-bottom.ant-btn { flex-direction: column-reverse; gap: 0; }
+.native-menu-command .native-menu-command-arrow { order: 3; }
 .native-fixed-form .native-button-glyph { color: #202020; }
 .native-commit-editor.ant-input { resize: none; border-color: #999; border-radius: 0; background: white; font: 12px "Segoe UI",sans-serif; }
 .migration-tree { position: relative; display: flex; flex-direction: column; overflow: hidden; border: 1px solid #9ea7b1; background: white; }
@@ -1465,6 +2020,14 @@ body { margin: 0; background: #f4f6f8; color: #172033; font-family: Inter, ui-sa
 .native-list-box.disabled { color: #6d6d6d; background: #f0f0f0; }
 .native-list-box-item { min-height: 15px; padding: 0 2px; white-space: nowrap; cursor: default; }
 .native-list-box-item.selected { color: #fff; background: #0078d7; }
+.native-generic-tree { overflow: auto; color: #202020; border: 1px solid #7a7a7a; background: #fff; font: 11px "Segoe UI",sans-serif; }
+.native-generic-tree.disabled { color: #6d6d6d; background: #f0f0f0; }
+.native-generic-tree-row { display: flex; align-items: center; width: 100%; min-height: 20px; padding-top: 1px; padding-right: 4px; padding-bottom: 1px; overflow: hidden; color: inherit; text-align: left; white-space: nowrap; border: 0; background: transparent; font: inherit; cursor: default; }
+.native-generic-tree-row:hover { background: #e5f0fb; }
+.native-generic-tree-row:focus { outline: 1px dotted #111; outline-offset: -2px; }
+.native-generic-tree-row.selected { color: #fff; background: #0078d7; }
+.native-generic-tree-row:disabled { color: inherit; }
+.native-generic-tree-expander { display: inline-grid; flex: 0 0 13px; width: 13px; place-items: center; font-size: 8px; }
 .migration-separator { align-self: stretch; width: 1px; min-height: 18px; background: #b9c0c8; }
 .migration-progress { align-self: center; width: 90px !important; height: 7px !important; overflow: hidden; border-radius: 8px; background: #d0d5db; }
 .migration-progress span { display: block; width: 38%; height: 100%; background: #3b7dcc; }

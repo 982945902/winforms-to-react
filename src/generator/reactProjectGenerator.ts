@@ -468,6 +468,7 @@ export type VisualAppearance = {
   multiline?: boolean;
   passwordChar?: string;
   maxLength?: number;
+  placeholderText?: string;
   dropDownStyle?: string;
   selectedIndex?: number;
   value?: string | number;
@@ -845,16 +846,16 @@ function WinControl({ control, hostStyle }: { control: VisualControl; hostStyle?
       const a = control.appearance ?? {};
       if (a.multiline) {
         const taStyle: CSSProperties = { ...style, resize: a.readOnly ? "none" : "vertical" };
-        return <textarea className="wf-input wf-textarea" style={taStyle} value={localValue ?? ""} onChange={(e) => setLocalValue(e.target.value)} readOnly={a.readOnly} maxLength={a.maxLength} aria-label={control.name} />;
+        return <textarea className="wf-input wf-textarea" style={taStyle} value={localValue ?? ""} onChange={(e) => setLocalValue(e.target.value)} readOnly={a.readOnly} maxLength={a.maxLength} placeholder={a.placeholderText} aria-label={control.name} />;
       }
       const inputType = a.passwordChar ? "password" : "text";
-      const placeholder = a.mask ? a.mask.replace(/0/g, "_").replace(/9/g, "_").replace(/[LA#?&><]/g, "_") : undefined;
+      const placeholder = a.placeholderText ?? (a.mask ? a.mask.replace(/0/g, "_").replace(/9/g, "_").replace(/[LA#?&><]/g, "_") : undefined);
       return <input className="wf-input" style={style} type={inputType} value={localValue ?? ""} onChange={(e) => setLocalValue(e.target.value)} readOnly={a.readOnly} maxLength={a.maxLength} placeholder={placeholder} aria-label={control.name} />;
     }
     case "RichTextBox": {
       const a = control.appearance ?? {};
       const taStyle: CSSProperties = { ...style, resize: a.readOnly ? "none" : "vertical" };
-      return <textarea className="wf-input wf-richtext" style={taStyle} value={localValue ?? ""} onChange={(e) => setLocalValue(e.target.value)} readOnly={a.readOnly} aria-label={control.name} />;
+      return <textarea className="wf-input wf-richtext" style={taStyle} value={localValue ?? ""} onChange={(e) => setLocalValue(e.target.value)} readOnly={a.readOnly} placeholder={a.placeholderText} aria-label={control.name} />;
     }
     case "Button":
       return <button className={"wf-button" + (btnFlash ? " wf-button-flash" : "")} style={style} title={eventTitle(control)} disabled={control.appearance?.enabled === false} onClick={() => { setBtnFlash(true); setTimeout(() => setBtnFlash(false), 200); const handler = control.events?.find((e) => e.event === "Click")?.handler; if (handler) window.dispatchEvent(new CustomEvent("wf-event", { detail: { control: control.name, handler } })); }}>{label || control.name}</button>;

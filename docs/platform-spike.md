@@ -248,8 +248,9 @@ Both the Refine production build and NocoBase client-v2 type check pass for this
 The same gate also removed host-framework leakage from basic WinForms controls. Empty text and combo fields no longer
 display generated variable names as placeholders; read-only, disabled, password, length, selection, font, alignment,
 checkbox, and radio state come from Designer metadata. `ListBox` now has a reusable native interaction adapter and
-renders an empty white list when its source collection is populated only at runtime, rather than inventing preview text.
-These changes live in the shared runtime and therefore apply to every generated project and both frontend targets.
+renders source-backed options when their code-behind domain can be resolved; genuinely dynamic business collections
+remain empty rather than receiving invented preview records. These changes live in the shared runtime and therefore
+apply to every generated project and both frontend targets.
 
 Fixed-form geometry now treats `ClientSize` as the interior area instead of shrinking it by the CSS window border.
 Fourteen-pixel labels retain their Designer height, multiline text boxes preserve wrapping state, and absolute tabs use
@@ -272,6 +273,249 @@ profile follows its checked source constants at 96 DPI: a 26-pixel title region,
 border and padding are sized so the 984×727 outer preview still contains the exact 974×696 Designer client area.
 Close-button geometry and the `#e81123` hover state also follow `FormODBase`; unrelated fixed forms keep the generic
 window profile.
+
+Custom controls that normalize to a standard kind now retain their declared C# `sourceType` in ProjectIR. For example,
+`OpenDental.UI.Button` still shares the generic Button layout, state, and event path, but selects the OpenDental button
+theme through a type adapter. The current profile takes its reusable constants from the checked source: `#1c5180` /
+`#006ebe` button borders and source gradients, Silver rounded group borders, SlateGray list borders with `#bac7db`
+selection, and `#adadad` / `#0078d7` combo states. `FormPatientEdit` exercises 19 custom buttons, 19 custom combos,
+five custom group boxes, and four custom lists. FormBrowse exercises none of those type matches, which is the regression
+gate against leaking this project profile into ordinary WinForms controls.
+
+Single-file conversion now includes the matching code-behind family when collecting inheritance and public control
+metadata. Selecting `FormPatientEdit.Designer.cs` directly therefore retains `FormPatientEdit : FormODBase` instead of
+requiring a whole-repository scan. This uses the same files already inspected for events, and makes representative-form
+spikes reliable without generating every form in a large legacy project.
+
+The same source-type profile now covers the remaining self-painted controls visible in this form. OpenDental's 20-pixel
+tab strip uses its Silver outline, `#f5f5f5` inactive tabs, `#aabee6` selected tab, and exact `(2,21)` TabPage inset;
+its 12 custom check boxes use the source 12-pixel square, dark check mark, and `#d2efff` hover fill while retaining
+checked, indeterminate, three-state, disabled, right-aligned, and tab-stop state. The warning-integrity adapter now draws
+the source 18×18 orange triangle instead of an unrelated circular badge.
+
+Composite external controls preserve their internal geometry without inventing business data. `ODDatePicker` keeps the
+source text field at x=63/width=102 and the flat 16-pixel calendar button at x=148 rather than stretching a date input
+across its 227-pixel host. `ComboBoxClinicPicker` preserves its 37-pixel `Clinic`/`Clinics` label area and draws the
+actual combo only in the remaining width. Its runtime clinic list is deliberately left for the backend contract; only
+explicit Designer options such as `IncludeUnassigned` and `HqDescription` appear in the preview.
+
+Absolute rendering now translates WinForms collection order into explicit CSS stacking order. WinForms child index zero
+is the front of the Z-order, whereas later DOM siblings normally paint on top; applying `controls.length - index` as the
+absolute sibling z-index preserves Designer intent without reversing keyboard/tab order or semantic layouts. This is
+observable in `FormPatientEdit`: `textZip` remains above its intentionally tucked-under suggestion combo instead of the
+empty combo covering the editable field.
+
+Code-behind `if/else` branches that hide opposing sets of controls are retained as neutral runtime visibility groups.
+The OpenDental gate yields exactly one group: `_isUsingNewRaceFeature` defaults to the modern read-only race/ethnicity
+fields and hides the overlapping legacy combos; its alternate branch does the reverse. The intentionally layered Zip
+controls are not classified as a state because they have no opposing visibility assignments. FormBrowse yields no
+visibility groups, providing a cross-project false-positive gate.
+
+Runtime-populated item collections are now explicit neutral IR contracts. The code-behind pass recognizes generic
+`Items.AddEnums<T>()`, `GetEnumDescriptions<T>()`, `GetLocalizedEnumDescriptions<T>()`, `Enum.GetNames(typeof(T))`,
+and typed `Items.AddList(list, ...)` calls, while preserving arbitrary dynamic AddList expressions even when their
+values cannot be evaluated. A `--context <project-root>` conversion option lets a selected single form resolve
+referenced C# enum declarations from the wider repository, including `[Description("...")]` labels, without converting
+every Designer file. Localized enum helpers additionally resolve neutral `.resx` keys in the conventional
+`Type_Member` form; `Enum.GetNames` deliberately retains raw member names instead of applying descriptions. One control
+can retain multiple item sources, and static Designer items are merged rather than overwritten.
+
+On the real OpenDental gate this materializes Status (7), Gender (4), Position (5), Contact/Confirm/Recall (9 each),
+and Preferred Pronouns (4) from the source enum domain. `listRelationships`, whose source is the runtime call
+`Patients.GetRelationships(Family,_listGuardians)`, keeps that dependency in ProjectIR but remains empty. FormBrowse
+produces no item-source contracts, demonstrating that the new pass does not leak OpenDental data into another project.
+Refine and NocoBase serialize byte-for-byte equivalent page/control IR for both gates.
+
+## Generated profile boundary
+
+Cross-project fidelity rules now have an explicit generated boundary. Each target emits the same
+`runtime/visualProfiles.tsx` registry, which owns page-profile selection, source-control type selection, and
+component-type adapter selection. The shared runtime asks that registry through stable functions rather than checking
+OpenDental namespaces or GitExtensions component IDs throughout ordinary control rendering. OpenDental composite
+controls and its dedicated CSS are emitted only when the converted page actually uses the profile. GitExtensions
+adapter selection is centralized in the same registry; its richer preview implementations are still shared runtime
+code and remain a later extraction task.
+
+This boundary is deliberately testable. The OpenDental gate receives only its matching source types, the FormBrowse
+gate receives its GitExtensions component mappings, and a generic test project receives neither profile nor
+OpenDental CSS. Refine and NocoBase emit identical profile files from the same ProjectIR. This makes source-specific
+fidelity work additive: a new adapter can improve one control family without silently changing the ordinary WinForms
+fallback used by every other project.
+
+## Third-project reuse gate: ShareX
+
+The third visual gate uses ShareX commit `94a740c035164c3c2c1337c4f340aa549df0c4af`, specifically
+`ShareX.UploadersLib/Forms/UploadersConfigForm`. It is a large settings surface: 5,066 Designer lines, 2,929
+code-behind lines, 511 converted controls, 49 `TabPage`s across five `TabControl`s, 14 group boxes, 26 combo boxes,
+113 text inputs, 41 buttons, and 285 event contracts. Thirteen instances of four business `UserControl` types are
+resolved from their Designer sources and registered once per type; `TabToTreeView` is a fifth resolved shared type.
+Both generated targets contain byte-for-byte equivalent page/control IR, while the generated visual-profile registry
+is empty. The page therefore exercises the generic path rather than a ShareX profile.
+
+This gate exposed two reusable parser/runtime defects. First, localized `.resx` values commonly place
+`<comment>@Invariant</comment>` after `<value>`; the previous parser discarded those entries and lost captions such as
+`Imgur`. The resource parser now accepts trailing metadata inside a data entry. Second, ShareX's `TabToTreeView`
+control binds `MainTabControl = tcUploaders` in code-behind. Rendering the five source tab strips directly would produce
+49 visible tabs and look nothing like the desktop settings window. The code-behind pass now records a neutral
+`RuntimeTabNavigator` relationship. The target runtime hides the consumed source `TabControl`, derives a nested left
+tree from its existing pages, honors `TreeViewSize` and `AutoSelectChild`, and renders the selected leaf page without
+copying or remapping each page.
+
+The same audit found a real profile leak: ordinary `TreeView` controls were reaching the FormBrowse changed-file
+fixture. Generic trees now render only parsed source nodes and remain blank when their contents are populated at
+runtime; the Git file-status preview is selected only through the GitExtensions page profile. This is the strongest
+current evidence that the work helps another project: ShareX forced changes to neutral parsing and runtime contracts,
+not ShareX-specific screenshots or page-name branches.
+
+The gate also exposed that `--context` previously resolved only enum/list domains. A single-file conversion could
+therefore compile while silently leaving sibling UserControls external and its referenced image manifest empty; stale
+files in an existing output directory could hide that regression. Context now supplies the inheritance graph, shared
+Designer-backed controls, localized component resources, and visual asset search while the selected Designer file
+remains the only emitted page. This restores FormBrowse's 87 source assets, keeps OpenDental's embedded form icon, and
+resolves ShareX's account, export/import, OAuth, and tree-navigation controls without generating unrelated forms.
+Both exporters clear their generated asset directory before writing the current manifest, so obsolete files from a
+previous conversion can no longer disguise an empty or incomplete asset resolution.
+
+Resolved UserControls retain their own Designer coordinate system instead of sending their internal fields through the
+page semantic-layout normalizer. This prevents compact labels from being classified as state overlays and keeps OAuth
+buttons, verification fields, and status rows in their original group-box geometry. Localized
+`resources.GetString("control.ItemsN")` entries are materialized as actual values (`Anonymous`, `User`) rather than
+displaying resource keys. Nonvisual context menus remain hidden as layout elements. When a source button references one
+through its `Menu` property, however, the runtime resolves that `ContextMenuStrip` by name inside the current page or
+shared-component scope and renders its nested items, separators, checked/disabled state, shortcuts, icons, and original
+event contracts. The real ShareX `ExportImportControl` therefore exposes its three Import commands and three Export
+commands from the single shared component definition in both targets. There is no renderer branch for `btnImport`,
+`btnExport`, ShareX, or FTP; another project using the same WinForms reference pattern follows the same path.
+
+Shared definitions now also preserve thin public-property facades from the UserControl code-behind. The context pass
+accepts only unconditional setter flows that can be proven to originate from `value`, including harmless casts,
+boolean negation, and a single field alias; method calls and conditional mutations remain contracts. The relationship
+is stored once as `ComponentDefinition.propertyBindings`, while instance values remain on each host control. At render
+time the shared tree is overlaid without being copied into page IR. On ShareX this maps
+`AccountTypeControl.SelectedAccountType` to its internal combo selection, so both real instances display `Anonymous`
+instead of an empty list. It also maps `OAuthControl.IsRefreshable` to the internal Refresh button visibility, so the
+Dropbox instance honors its source `false` value without creating a Dropbox-specific component or profile rule.
+
+Component construction state now follows a separate, deliberately bounded evaluator. It starts only at a resolved
+UserControl's parameterless constructor, follows same-class property setters and no-argument method calls, and selects
+an `if` or `switch` branch only when its condition is constant from C# field/auto-property defaults or an earlier
+constructor assignment. Right-hand sides are limited to literals, unique neutral `Resources.resx` strings, enum
+members, simple comparisons, and `Color.FromArgb`; conflicting resource keys, unknown method results, and unresolved
+branches are ignored. Each result is retained as `ComponentDefinition.initializationDefaults` with its source file,
+line, method, and proven condition.
+
+On the real ShareX gate, `OAuthControl` assigns `Status = LoginRequired` in its constructor, so the selected switch
+case now supplies `Not logged in.` and `rgb(200, 0, 0)` to the status label while both authorization buttons remain
+disabled. `OAuthLoopbackControl.Connected` is a default-false auto-property, so its constructor's `UpdateStatus()`
+selects the else branch, restoring `Connect...`, `Not logged in.`, and the source red color. The labels begin empty and
+have design-time width zero; the fixed renderer now honors WinForms `AutoSize` for that zero-sized axis so the proven
+runtime captions are actually visible. No account identity or successful-login branch is fabricated.
+
+Text-entry hints follow the same source-proven path. Direct Designer and localized `.resx` properties named
+`PlaceholderText`, `WatermarkText`, or `CueBannerText`, plus reachable code-behind calls to `SetWatermark`,
+`SetCueBanner`, and `SetPlaceholderText`, normalize to `VisualAppearance.placeholderText`. A `HandleCreated` watermark
+subscription inside a constructor is treated as deterministic UI initialization, while calls inside ordinary deferred
+handlers and unresolved control-flow branches remain contracts. The unique-neutral-resource catalog is shared by form
+and UserControl initialization rather than copied into either target. On ShareX this restores the Backblaze B2 bucket
+hint on the page and `Paste verification code here` once inside the shared `OAuthControl` definition; Refine and
+NocoBase render the same IR field with no ShareX control-name rule.
+
+Localized `ListView` column `Text` and `Width` values are also recovered. ShareX's initial Imgur page therefore shows
+the source `ID`, `Title`, and `Description` header geometry over a genuinely empty white list surface; it no longer
+injects a migration-status sentence into a data control whose runtime records are not available yet.
+
+Shared definitions now retain the UserControl's own `$this.Size` as their local coordinate space. The runtime applies
+WinForms `Anchor` and `Dock` edge margins within that space instead of freezing every child at the definition's design
+width. This matters on the real gate: `OAuthLoopbackControl` is designed at 299 pixels but instantiated at 448 pixels;
+its `Top, Left, Right` status row and Connect button now stretch to the host exactly as WinForms does. The same edge
+logic is used for fixed forms and selected tab pages. Form-level `BackColor`, `ForeColor`, and `Font` are also neutral
+IR properties, so ShareX's `SystemColors.Window` client and tab surfaces render white rather than inheriting the generic
+control-gray canvas.
+
+Localized appearance now follows the same neutral path as direct Designer assignments. `.resx` values for colors,
+border style, content alignment, padding/margin, right-to-left direction, read-only/multiline/password state, text
+limits, scrolling/drop-down modes, and minimum/maximum sizes are merged only when the Designer did not already set the
+property directly. The target runtime consumes the portable visual subset rather than selecting a ShareX theme. On the
+real gate this makes all four `OAuthControl` command buttons inherit their source `MiddleLeft` alignment and three-pixel
+left padding, while `txtPlikComment` and `txtEmailDefaultBody` enter the ordinary multiline text-area renderer. The same
+pass also finds localized appearance values in FormBrowse and OpenDental, providing a cross-project guard against
+sample-specific mapping.
+
+The standard-control runtime now consumes several appearance fields that were previously only reported. A WinForms
+`ComboBox` keeps its editable default unless the source declares `DropDownList`; this separates OpenDental's 19 default
+combos from ShareX's 24 list-only combos without a project branch. `TabControl.Multiline` enables wrapped header rows,
+so ShareX's nested file-uploader tabs no longer have to compress into one clipped row. Numeric input alignment reaches
+the actual input element, multiline text honors its scrollbar mode, and button images can follow `ImageAlign`. These
+rules live in the shared runtime and are emitted identically for both targets.
+
+The three-gate fallback audit also found one remaining standard control in a real page: ShareX's Shared Folder tab uses
+a 600×480 `PropertyGrid`. It now renders the native toolbar/body/help geometry and respects `ToolbarVisible` and
+`HelpVisible` instead of showing a striped migration placeholder. A generic code-behind pass traces
+`SelectedObject = list.Items[...]` through typed variables, casts, `foreach`, and `Items.Add` calls. The wider context
+then resolves the selected class without executing it and extracts only provable `Category`, `DisplayName`,
+`Description`, `Browsable`, `PasswordPropertyText`, `ReadOnly`, `Editor`, `DefaultValue`, property-initializer, and
+parameterless-constructor metadata.
+
+On ShareX this resolves `LocalhostAccount` into 12 visible source fields: `Browsable(false)` excludes `LocalUri`, the
+password field is masked, directory selection retains an editor button, booleans use checkboxes, computed previews are
+read-only, and constructor defaults such as `Name = "New account"`, `Port = 80`, and `RemoteProtocol = file` populate
+the value column. Selecting a row shows its actual source description in the native help pane. No saved account record
+or computed path is fabricated; live instance values remain a later backend/data-binding contract. Four ShareX
+`LinkLabel` instances use link color, underline, focus, disabled, and pointer treatment rather than ordinary label
+styling. `PropertyGrid` remains marked degraded for missing live values, but no longer resembles converter output.
+
+The same source-only rule now restores ten runtime-populated ShareX combo boxes without adding a ShareX profile. FTP
+protocol and encryption, Imgur thumbnail type, Pastebin privacy/expiration, PrivateBin expiration/format, Box access,
+Amazon S3 storage class, and YouTube privacy contribute 45 proven enum options. Default resource strings replace raw
+localized member names where available—for example `Small square`, `Private (members only)`, `5 Minutes`, and
+`Plain Text`—while description-backed options retain values such as `https://` and `Amazon S3 Intelligent-Tiering`.
+Account lists and other database/network-derived collections remain empty contracts rather than fabricated preview
+records.
+
+Untyped `Items.AddRange(...)` calls are also retained as contracts. For static `Class.Member` sources, the context pass
+can materialize literal string arrays directly. Object collections are accepted only when static analysis can connect
+the element's `ToString()` return property to a constructor parameter and each initializer supplies a literal at that
+position. This restores all 26 `AmazonS3.Endpoints` display names and both `Lambda.UploadURLs` values in ShareX, raising
+the page to 12 resolved runtime-list controls and 73 proven options. `Config.PhotobucketAccountInfo.AlbumList` remains
+empty because it is account data, and `Pastebin.GetSyntaxList()` remains an explicit method contract because reproducing
+its algorithm would require a broader code evaluator. The distinction is source-semantic, not a control-name allowlist.
+
+Code-behind initialization state now follows the same boundary. A local method graph starts at the form constructor and
+wired `Load`/`Shown` handlers, then retains assignments to `Text`, `Checked`, `Enabled`, `ReadOnly`, `PlaceholderText`,
+`Value`, `SelectedIndex`, and `SelectedItem`, as well as recognized watermark helper calls. Literal assignments are
+immediately provable. Configuration-like model types can
+also resolve property-initializer and parameterless-constructor defaults from project context, including nested objects
+that are explicitly instantiated. Ordinary entities such as `Patient` or `Order` remain contracts, and a property with
+competing or unresolved initialization assignments is not given a guessed value.
+
+The ShareX gate now records 196 initialization contracts on 179 controls; 141 source assignments have proven defaults
+after excluding 12 conditional/deferred assignments from preview materialization.
+This selects `Medium thumbnail` on Imgur, checks its direct-link and GIFV options, restores paths such as
+`ShareX/%y/%mo`, fills default mail text such as `smtp.gmail.com` and `Sending email from ShareX`, and selects the
+source YouTube privacy default. Each resolved value remains attached to its original expression and source line for the
+later C# backend migration. No saved credentials, accounts, albums, or user records are synthesized.
+
+Simple event-driven presentation state is now live rather than merely listed as a C# contract. The code-behind pass
+accepts a binding only when a wired change handler directly assigns `Enabled`, `ReadOnly`, or `Visible` from the same
+trigger control's boolean state, with optional negation. Calls, `Config`/entity reads, computed expressions, and reads
+from unrelated controls are rejected. ShareX proves seven such bindings: OneDrive and Seafile reveal dependent share
+options, Backblaze B2 toggles its custom-URL editor, and Plik toggles credential/comment editability. The target runtime
+derives both initial and clicked state from those neutral bindings, and scopes interaction state by component instance
+so repeated UserControls cannot affect one another. Refine and NocoBase consume the same relationship list; no service,
+checkbox, or page name appears in the parser or renderer.
+
+ShareX also populates the left navigation ImageList at runtime, so Designer-only conversion previously produced 49
+correct labels but no service icons. The context pass now pairs a service class only when that same class proves both a
+Resources-backed `ServiceIcon`/`ServiceImage` and a method returning a specific configuration `TabPage`. It resolves 45
+leaf pages this way. The first Resources item added to an assigned ImageList is preserved as the default node icon,
+covering the four top-level uploader categories exactly as the source TreeView does. Asset lookup treats hyphens and
+underscores as equivalent only after exact matching, allowing keys such as `folder_network` to resolve the source file
+`folder-network.png`. The gate now emits 46 real image assets and every one of the 49 navigation nodes has an effective,
+resolved icon; no TabPage-name table or ShareX profile was introduced.
+
+The ShareX Refine output passes TypeScript plus a Vite production build, and its NocoBase client-v2 output passes
+TypeScript. Both preview servers return HTTP 200. Manual screenshot comparison is still required before claiming
+pixel-level parity for this third gate.
 
 ## Target validation
 

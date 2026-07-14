@@ -1,4 +1,4 @@
-import { copyFile, mkdir, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ProjectIR } from "../ir/types.js";
 import { buildTargetManifest } from "../ir/targetManifest.js";
@@ -7,6 +7,7 @@ import {
   migrationStylesCss,
   migrationSurfaceTsx,
 } from "./migrationTargetRuntime.js";
+import { migrationVisualProfilesTsx, migrationVisualProfileStylesCss } from "./migrationVisualProfiles.js";
 
 export async function generateNocoBasePlugin(input: { outDir: string; project: ProjectIR }): Promise<void> {
   const client = join(input.outDir, "src", "client-v2");
@@ -14,6 +15,7 @@ export async function generateNocoBasePlugin(input: { outDir: string; project: P
   const runtime = join(client, "runtime");
   const pages = join(client, "pages");
   const assets = join(client, "assets");
+  await rm(assets, { recursive: true, force: true });
   await Promise.all([
     mkdir(generated, { recursive: true }), mkdir(runtime, { recursive: true }), mkdir(pages, { recursive: true }), mkdir(assets, { recursive: true }),
   ]);
@@ -29,7 +31,8 @@ export async function generateNocoBasePlugin(input: { outDir: string; project: P
     writeFile(join(pages, "MigrationPage.tsx"), pageTsx(), "utf8"),
     writeFile(join(runtime, "MigrationSurface.tsx"), migrationSurfaceTsx(input.project), "utf8"),
     writeFile(join(runtime, "componentRegistry.tsx"), componentRegistryTsx(input.project), "utf8"),
-    writeFile(join(client, "styles.css"), migrationStylesCss(), "utf8"),
+    writeFile(join(runtime, "visualProfiles.tsx"), migrationVisualProfilesTsx(input.project), "utf8"),
+    writeFile(join(client, "styles.css"), `${migrationStylesCss()}${migrationVisualProfileStylesCss(input.project)}`, "utf8"),
     writeFile(join(input.outDir, "README.md"), readme(manifest.totals), "utf8"),
     ...input.project.assets.map((asset) => asset.contentBase64
       ? writeFile(join(assets, asset.targetFileName), Buffer.from(asset.contentBase64, "base64"))

@@ -35,9 +35,12 @@ export async function parseResx(filePath: string): Promise<ResxData> {
   const source = await readFile(filePath, "utf8");
   const data: ResxData = new Map();
 
-  // Match <data name="X.Y" ...><value>Z</value></data>
+  // Match <data name="X.Y" ...><value>Z</value>...</data>. Localized
+  // WinForms resources often insert a <comment>@Invariant</comment> after the
+  // value; requiring </data> immediately after </value> silently dropped those
+  // labels (notably ShareX's nested TabPage captions).
   // Skip entries starting with >> (designer metadata like >>btnCancel.Parent)
-  const pattern = /<data\s+name="([^"&][^"]*)"(?:[^>]*)>\s*<value(?:[^>]*)>([^<]*)<\/value>\s*<\/data>/g;
+  const pattern = /<data\s+name="([^"&][^"]*)"(?:[^>]*)>[\s\S]*?<value(?:[^>]*)>([\s\S]*?)<\/value>[\s\S]*?<\/data>/g;
   for (const match of source.matchAll(pattern)) {
     const fullName = match[1];
     const value = decodeXmlEntities(match[2].trim());
@@ -92,9 +95,30 @@ export type ResxProps = {
   enabled?: boolean;
   autoSize?: boolean;
   padding?: { left: number; top: number; right: number; bottom: number };
+  margin?: { left: number; top: number; right: number; bottom: number };
   image?: string;
   imageKey?: string;
   dgvColumnHeaderText?: string;
+  width?: number;
+  foreColor?: string;
+  backColor?: string;
+  borderStyle?: string;
+  textAlign?: string;
+  checkAlign?: string;
+  imageAlign?: string;
+  rightToLeft?: string;
+  flatStyle?: string;
+  readOnly?: boolean;
+  multiline?: boolean;
+  wordWrap?: boolean;
+  useSystemPasswordChar?: boolean;
+  passwordChar?: string;
+  maxLength?: number;
+  placeholderText?: string;
+  scrollBars?: string;
+  dropDownStyle?: string;
+  minimumSize?: { width: number; height: number };
+  maximumSize?: { width: number; height: number };
 };
 
 export function applyResxToProps(controlName: string, resx: ResxData): ResxProps {
@@ -118,6 +142,8 @@ export function applyResxToProps(controlName: string, resx: ResxData): ResxProps
   };
   result.size = parseSize(props.get("Size"));
   result.clientSize = parseSize(props.get("ClientSize"));
+  result.minimumSize = parseSize(props.get("MinimumSize"));
+  result.maximumSize = parseSize(props.get("MaximumSize"));
 
   const text = props.get("Text");
   if (text) result.text = text;
@@ -154,6 +180,15 @@ export function applyResxToProps(controlName: string, resx: ResxData): ResxProps
   const autoSize = props.get("AutoSize");
   if (autoSize) result.autoSize = autoSize === "True";
 
+  const booleanValue = (name: string): boolean | undefined => {
+    const value = props.get(name);
+    return value === undefined ? undefined : value === "True";
+  };
+  result.readOnly = booleanValue("ReadOnly");
+  result.multiline = booleanValue("Multiline");
+  result.wordWrap = booleanValue("WordWrap");
+  result.useSystemPasswordChar = booleanValue("UseSystemPasswordChar");
+
   // Image references (ImageKey from resx for buttons/toolstrip items)
   const image = props.get("Image");
   if (image) result.image = image;
@@ -166,10 +201,32 @@ export function applyResxToProps(controlName: string, resx: ResxData): ResxProps
     const parts = padding.split(",").map((s) => Number(s.trim()));
     if (parts.length >= 4) result.padding = { left: parts[0], top: parts[1], right: parts[2], bottom: parts[3] };
   }
+  const margin = props.get("Margin");
+  if (margin) {
+    const parts = margin.split(",").map((s) => Number(s.trim()));
+    if (parts.length >= 4) result.margin = { left: parts[0], top: parts[1], right: parts[2], bottom: parts[3] };
+  }
+
+  result.foreColor = props.get("ForeColor");
+  result.backColor = props.get("BackColor");
+  result.borderStyle = props.get("BorderStyle");
+  result.textAlign = props.get("TextAlign");
+  result.checkAlign = props.get("CheckAlign");
+  result.imageAlign = props.get("ImageAlign");
+  result.rightToLeft = props.get("RightToLeft");
+  result.flatStyle = props.get("FlatStyle");
+  result.passwordChar = props.get("PasswordChar");
+  result.placeholderText = props.get("PlaceholderText") ?? props.get("WatermarkText") ?? props.get("CueBannerText");
+  result.scrollBars = props.get("ScrollBars");
+  result.dropDownStyle = props.get("DropDownStyle");
+  const maxLength = Number(props.get("MaxLength"));
+  if (Number.isFinite(maxLength)) result.maxLength = maxLength;
 
   // DataGridView column header text: colName.HeaderText -> actual display text
   const headerText = props.get("HeaderText");
   if (headerText) result.dgvColumnHeaderText = headerText;
+  const width = Number(props.get("Width"));
+  if (Number.isFinite(width)) result.width = width;
 
   return result;
 }

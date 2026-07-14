@@ -10,6 +10,7 @@ import { convertDesignerSources, findDesignerFiles } from "./parser/scanner.js";
 
 type CliOptions = {
   input?: string;
+  contextRoot?: string;
   outDir?: string;
   format?: "json" | "text";
   formEngine?: "compat" | "tanstack";
@@ -55,7 +56,9 @@ async function runConvert(options: CliOptions) {
   const input = resolveRequiredInput(options);
   const outDir = resolve(options.outDir ?? "out/wf2react-preview");
   if (options.target === "refine" || options.target === "nocobase") {
-    const project = await buildProjectIR(input);
+    const project = await buildProjectIR(input, {
+      contextRoot: options.contextRoot ? resolve(options.contextRoot) : undefined,
+    });
     if (options.target === "refine") {
       await generateRefineProject({ outDir, project });
     } else {
@@ -110,6 +113,8 @@ function parseOptions(args: string[]): CliOptions {
         throw new Error(`Unknown target: ${target}`);
       }
       options.target = target;
+    } else if (arg === "--context") {
+      options.contextRoot = args[++i];
     } else if (!options.input) {
       options.input = arg;
     } else {
@@ -131,12 +136,13 @@ function printHelp() {
 
 Usage:
   wf2react scan <file-or-folder> [--json]
-  wf2react convert <file-or-folder> --out <dir> [--target compat|refine|nocobase]
+  wf2react convert <file-or-folder> --out <dir> [--target compat|refine|nocobase] [--context <project-root>]
   wf2react report <file-or-folder> [--out <dir>]
 
   --form tanstack  [已废弃] 生成 TanStack Form + Zod,而非默认 React 预览。冻结不再维护。
   --target refine  生成可运行的 Refine/React 验证项目。
   --target nocobase 生成可放入 NocoBase 2.1 workspace 的 client-v2 插件源码。
+  --context <path>  为单窗体迁移提供更大的源码上下文，用于解析运行时枚举等数据契约。
 `);
 }
 

@@ -175,6 +175,7 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
         kind,
         name,
         typeName,
+        sourceType: typeName,
         appearance: emptyAppearance(),
         properties: {},
         events: [],
@@ -202,6 +203,7 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
         kind,
         name,
         typeName,
+        sourceType: typeName,
         appearance: emptyAppearance(),
         properties: {},
         events: [],
@@ -228,7 +230,7 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
   }
 
   applyColumns(stripped, controls, columns);
-  applyListItems(stripped, controls);
+  applyListItems(stripped, controls, options.resxData);
   applyTableLayout(stripped, controls);
   applyControlHierarchy(stripped, controls, form);
   applyToolStripHierarchy(stripped, controls);
@@ -312,6 +314,7 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
           kind: "Component",
           name,
           typeName: (control.properties.originalKind as string) ?? control.kind,
+          sourceType: control.sourceType,
           appearance: emptyAppearance(),
           properties: { nonVisual: true },
           events: retainedEvents,
@@ -470,12 +473,18 @@ export function stripComments(source: string): string {
 
     if (ch === "/" && next === "/") {
       const end = source.indexOf("\n", i + 2);
-      i = end === -1 ? length : end;
+      const commentEnd = end === -1 ? length : end;
+      result += source.slice(i, commentEnd).replace(/[^\r\n]/g, " ");
+      i = commentEnd;
       continue;
     }
     if (ch === "/" && next === "*") {
       const end = source.indexOf("*/", i + 2);
-      i = end === -1 ? length : end + 2;
+      const commentEnd = end === -1 ? length : end + 2;
+      // Keep offsets and line breaks stable: code-behind contracts carry
+      // source line numbers and block comments must not shift them upward.
+      result += source.slice(i, commentEnd).replace(/[^\r\n]/g, " ");
+      i = commentEnd;
       continue;
     }
     if (ch === "@" && next === "\"") {
@@ -706,6 +715,7 @@ function assignControlProperty(control: MutableControl, property: string, value:
     case "CheckState": {
       // Tri-state: Checked/Indeterminate render as checked; Unchecked as not.
       const state = String(value ?? "");
+      control.appearance.checkState = state;
       if (state === "Checked" || state === "Indeterminate") control.appearance.checked = true;
       else if (state === "Unchecked") control.appearance.checked = false;
       break;
@@ -724,6 +734,11 @@ function assignControlProperty(control: MutableControl, property: string, value:
       break;
     case "UseSystemPasswordChar":
       if (value === true) control.appearance.passwordChar = "•";
+      break;
+    case "PlaceholderText":
+    case "WatermarkText":
+    case "CueBannerText":
+      control.appearance.placeholderText = String(value ?? "");
       break;
     case "MaxLength":
       if (typeof value === "number") control.appearance.maxLength = value;
@@ -850,6 +865,15 @@ function assignFormProperty(form: VisualForm, property: string, value: unknown) 
     case "Name":
       form.properties[property] = value;
       break;
+    case "BackColor":
+      form.properties.BackColor = parseColor(value);
+      break;
+    case "ForeColor":
+      form.properties.ForeColor = parseColor(value);
+      break;
+    case "Font":
+      form.properties.Font = parseFont(value);
+      break;
     case "FormBorderStyle":
       form.formBorderStyle = String(value ?? "");
       break;
@@ -938,12 +962,12 @@ function applyEvents(source: string, controls: Map<string, MutableControl>, form
 
   // Form-level events: `this.Event += new EventHandler(this.Handler);` or
   // `this.Event += this.Handler;` — no control segment, target is the form.
-  const formCtorPattern = /this\.([A-Za-z_]\w*)\s*\+=\s*new\s+[A-Za-z_][\w.]*(?:<[^>]*>)?\s*\(\s*(?:this\.)?([A-Za-z_]\w*)\s*\)/g;
+  const formCtorPattern = /(?<![\w.])(?:this\.)?([A-Za-z_]\w*)\s*\+=\s*new\s+[A-Za-z_][\w.]*(?:<[^>]*>)?\s*\(\s*(?:this\.)?([A-Za-z_]\w*)\s*\)/g;
   for (const match of source.matchAll(formCtorPattern)) {
     if (controls.has(match[1])) continue; // already handled as a control event
     pushEvent(form.name, match[1], match[2]);
   }
-  const formDirectPattern = /this\.([A-Za-z_]\w*)\s*\+=\s*this\.([A-Za-z_]\w*)\s*;/g;
+  const formDirectPattern = /(?<![\w.])(?:this\.)?([A-Za-z_]\w*)\s*\+=\s*(?:this\.)?([A-Za-z_]\w*)\s*;/g;
   for (const match of source.matchAll(formDirectPattern)) {
     if (controls.has(match[1])) continue;
     pushEvent(form.name, match[1], match[2]);
@@ -973,12 +997,12 @@ function applyColumns(source: string, controls: Map<string, MutableControl>, col
   }
 }
 
-function applyListItems(source: string, controls: Map<string, MutableControl>) {
+function applyListItems(source: string, controls: Map<string, MutableControl>, resxData?: ResxData) {
   const addRangePattern = /(?:this\.)?([A-Za-z_]\w*)\.Items\.AddRange\(\s*new\s*(?:(?:(?:System\.)?(?:Object|String)|object|string)\s*)?\[\]\s*\{([\s\S]*?)\}\s*\);/g;
   for (const match of source.matchAll(addRangePattern)) {
     const control = controls.get(match[1]);
     if (!control || !isListLikeKind(control.kind)) continue;
-    appendItems(control, extractStringLiterals(match[2]));
+    appendItems(control, extractListItemValues(match[2], resxData));
   }
 
   const addPattern = /(?:this\.)?([A-Za-z_]\w*)\.Items\.Add\(\s*(@?"(?:[^"\\]|\\.|"")*")\s*(?:,[^)]*)?\);/g;
@@ -1012,6 +1036,25 @@ function parseTreeNodeTexts(source: string): Map<string, string> {
 
 function extractStringLiterals(source: string): string[] {
   return [...source.matchAll(/@?"(?:[^"\\]|\\.|"")*"/g)].map((match) => String(parseValue(match[0])));
+}
+
+function extractListItemValues(source: string, resxData?: ResxData): string[] {
+  const values: string[] = [];
+  // Localizable WinForms Designers emit resources.GetString("combo.Items")
+  // inside Items.AddRange. Consume that call as one token so its key literal
+  // is never mistaken for visible list content.
+  const tokenPattern = /(?:[A-Za-z_]\w*\.)?GetString\(\s*(@?"(?:[^"\\]|\\.|"")*")\s*\)|(@?"(?:[^"\\]|\\.|"")*")/g;
+  for (const match of source.matchAll(tokenPattern)) {
+    if (match[1]) {
+      const key = String(parseValue(match[1]));
+      const dot = key.indexOf(".");
+      const resolved = dot > 0 ? resxData?.get(key.slice(0, dot))?.get(key.slice(dot + 1)) : undefined;
+      if (resolved !== undefined) values.push(resolved);
+    } else if (match[2]) {
+      values.push(String(parseValue(match[2])));
+    }
+  }
+  return values;
 }
 
 function appendItems(control: MutableControl, items: string[]) {
@@ -1348,9 +1391,9 @@ function applyToolStripHierarchy(source: string, controls: Map<string, MutableCo
 function applyResxToColumns(columns: Map<string, MutableColumn>, resx: ResxData) {
   for (const [name, column] of columns) {
     const colProps = applyResxToProps(name, resx);
-    if (colProps.dgvColumnHeaderText && !column.headerText) {
-      column.headerText = colProps.dgvColumnHeaderText;
-    }
+    const headerText = colProps.dgvColumnHeaderText ?? colProps.text;
+    if (headerText && !column.headerText) column.headerText = headerText;
+    if (colProps.width !== undefined && column.width === undefined) column.width = colProps.width;
   }
 }
 
@@ -1399,6 +1442,74 @@ function applyResxToControls(controls: Map<string, MutableControl>, form: Visual
     if (props.padding && !control.appearance.padding) {
       control.appearance.padding = props.padding;
     }
+    if (props.margin && !control.appearance.margin) {
+      control.appearance.margin = props.margin;
+    }
+    if (props.foreColor && !control.appearance.foreColor) {
+      control.appearance.foreColor = parseColor(props.foreColor);
+    }
+    if (props.backColor && !control.appearance.backColor) {
+      control.appearance.backColor = parseColor(props.backColor);
+    }
+    if (props.borderStyle && !control.appearance.borderStyle) {
+      control.appearance.borderStyle = parseBorderStyle(props.borderStyle);
+    }
+    if (props.textAlign && !control.appearance.textAlign) {
+      control.appearance.textAlign = parseContentAlignment(props.textAlign);
+    }
+    if (props.checkAlign && !control.appearance.checkAlign) {
+      control.appearance.checkAlign = parseContentAlignment(props.checkAlign);
+    }
+    if (props.imageAlign && !control.appearance.imageAlign) {
+      control.appearance.imageAlign = parseContentAlignment(props.imageAlign);
+    }
+    if (props.rightToLeft && control.appearance.rightToLeft == null) {
+      // Match the direct Designer assignment path. `Inherit` remains true in
+      // the neutral boolean model until parent direction is represented.
+      control.appearance.rightToLeft = props.rightToLeft === "Yes" || props.rightToLeft === "Inherit";
+    }
+    if (props.flatStyle && control.appearance.flatStyle == null) {
+      control.appearance.flatStyle = props.flatStyle;
+    }
+    if (props.readOnly != null && control.appearance.readOnly == null) {
+      control.appearance.readOnly = props.readOnly;
+    }
+    if (props.multiline != null && control.appearance.multiline == null) {
+      control.appearance.multiline = props.multiline;
+    }
+    if (props.wordWrap != null && control.appearance.wordWrap == null) {
+      control.appearance.wordWrap = props.wordWrap;
+    }
+    if (props.passwordChar != null && control.appearance.passwordChar == null) {
+      control.appearance.passwordChar = props.passwordChar;
+    }
+    if (props.useSystemPasswordChar === true && control.appearance.passwordChar == null) {
+      control.appearance.passwordChar = "•";
+    }
+    if (props.maxLength != null && control.appearance.maxLength == null) {
+      control.appearance.maxLength = props.maxLength;
+    }
+    if (props.placeholderText != null && control.appearance.placeholderText == null) {
+      control.appearance.placeholderText = props.placeholderText;
+    }
+    if (props.scrollBars && control.appearance.scrollBars == null) {
+      control.appearance.scrollBars = props.scrollBars;
+    }
+    if (props.dropDownStyle && control.appearance.dropDownStyle == null) {
+      control.appearance.dropDownStyle = props.dropDownStyle;
+    }
+    if (props.minimumSize && !control.appearance.minimumSize) {
+      control.appearance.minimumSize = props.minimumSize;
+    }
+    if (props.maximumSize && !control.appearance.maximumSize) {
+      control.appearance.maximumSize = props.maximumSize;
+    }
+    if (props.image && !control.appearance.image) {
+      control.appearance.image = props.image;
+    }
+    if (props.imageKey && !control.appearance.imageKey) {
+      control.appearance.imageKey = props.imageKey;
+    }
   }
 
   // Also apply to form itself ($this)
@@ -1410,6 +1521,21 @@ function applyResxToControls(controls: Map<string, MutableControl>, form: Visual
   }
   if (formProps.text && !form.text) {
     form.text = formProps.text;
+  }
+  if (formProps.font && !form.properties.Font) {
+    form.properties.Font = formProps.font;
+  }
+  if (formProps.backColor && !form.properties.BackColor) {
+    form.properties.BackColor = parseColor(formProps.backColor);
+  }
+  if (formProps.foreColor && !form.properties.ForeColor) {
+    form.properties.ForeColor = parseColor(formProps.foreColor);
+  }
+  if (formProps.minimumSize && !form.properties.MinimumSize) {
+    form.properties.MinimumSize = formProps.minimumSize;
+  }
+  if (formProps.maximumSize && !form.properties.MaximumSize) {
+    form.properties.MaximumSize = formProps.maximumSize;
   }
 }
 

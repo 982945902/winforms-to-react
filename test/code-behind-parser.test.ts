@@ -169,6 +169,19 @@ public partial class C : Form {
     ]);
   });
 
+  it("records the first Resources-backed ImageList item as a navigation fallback", () => {
+    const info = parseCodeBehind(`partial class F {
+      void Init() {
+        navigationImages.Images.Add(Resources.NavigationRoot);
+        navigationImages.Images.Add(Resources.Cloud);
+        treeNavigator.ImageList = navigationImages;
+      }
+    }`, "/proj/F.cs");
+    expect(info.appearanceHints).toEqual([
+      { controlName: "treeNavigator", property: "imageKey", value: "NavigationRoot" },
+    ]);
+  });
+
   it("does not mistake runtime image variables for concrete asset keys", () => {
     const info = parseCodeBehind(`partial class F {
       void UpdateIcons() {
@@ -201,5 +214,367 @@ public partial class C : Form {
         viewKind: "terminal",
       }),
     ]);
+  });
+
+  it("records custom navigators bound to an existing TabControl", () => {
+    const info = parseCodeBehind(`partial class SettingsForm {
+      void InitializeNavigation() {
+        this.settingsTree.MainTabControl = this.settingsTabs;
+      }
+    }`, "/proj/SettingsForm.cs");
+    expect(info.tabNavigators).toEqual([{
+      navigatorControlName: "settingsTree",
+      property: "MainTabControl",
+      tabControlName: "settingsTabs",
+      sourceFile: "SettingsForm.cs",
+      line: 3,
+    }]);
+  });
+
+  it("records mutually exclusive visibility branches without treating overlays as states", () => {
+    const info = parseCodeBehind(`partial class F {
+      void LoadFields() {
+        if (_useModernFields) {
+          legacyRace.Visible = false;
+          legacyEthnicity.Visible = false;
+          modernEditor.Visible = true;
+        }
+        else {
+          modernRace.Visible = false;
+          modernEthnicity.Visible = false;
+          modernEditor.Visible = false;
+        }
+        zipSuggestions.SelectedIndex = -1;
+      }
+    }`, "/proj/F.cs");
+    expect(info.visibilityGroups).toEqual([{
+      condition: "_useModernFields",
+      defaultVariant: 0,
+      variants: [
+        {
+          label: "_useModernFields",
+          hiddenControls: ["legacyRace", "legacyEthnicity"],
+          shownControls: ["modernEditor", "modernRace", "modernEthnicity"],
+        },
+        {
+          label: "not (_useModernFields)",
+          hiddenControls: ["modernRace", "modernEthnicity", "modernEditor"],
+          shownControls: ["legacyRace", "legacyEthnicity"],
+        },
+      ],
+      sourceFile: "F.cs",
+      line: 3,
+    }]);
+  });
+
+  it("records only direct source-proven control state dependencies", () => {
+    const info = parseCodeBehind(`partial class SettingsForm {
+      void includeDetails_CheckedChanged(object sender, EventArgs e) {
+        details.Enabled = includeDetails.Checked;
+        notes.ReadOnly = !includeDetails.Checked;
+        secret.Visible = account.Enabled;
+        computed.Enabled = CanEnableDetails();
+      }
+    }`, "/proj/SettingsForm.cs");
+
+    expect(info.controlBindings).toEqual([
+      expect.objectContaining({
+        handler: "includeDetails_CheckedChanged",
+        sourceControlName: "includeDetails",
+        sourceProperty: "checked",
+        targetControlName: "details",
+        targetProperty: "enabled",
+      }),
+      expect.objectContaining({
+        handler: "includeDetails_CheckedChanged",
+        sourceControlName: "includeDetails",
+        targetControlName: "notes",
+        targetProperty: "readOnly",
+        negated: true,
+      }),
+      expect.objectContaining({
+        sourceControlName: "account",
+        sourceProperty: "enabled",
+        targetControlName: "secret",
+        targetProperty: "visible",
+      }),
+    ]);
+    expect(info.controlBindings.some((binding) => binding.targetControlName === "computed")).toBe(false);
+  });
+
+  it("records enum and typed-list item sources populated in code-behind", () => {
+    const info = parseCodeBehind(`using System.Collections.Generic;
+partial class PatientForm {
+  private List<PatientStatus> _patientStatuses = new();
+  private IReadOnlyList<App.Domain.PatientPosition>? _positions;
+  void FillLists() {
+    listGender.Items.AddEnums<App.Domain.PatientGender>();
+    this.listStatus.Items.AddList(this._patientStatuses, value => value.GetDescription());
+    listPosition.Items.AddList(_positions, value => value.ToString());
+    listRelationships.Items.AddList(Patients.GetRelationships(Family, _guardians), value => value);
+  }
+}`, "/proj/PatientForm.cs");
+
+    expect(info.itemHints).toEqual([
+      {
+        controlName: "listGender",
+        source: {
+          kind: "enum",
+          typeName: "PatientGender",
+          expression: "Items.AddEnums<App.Domain.PatientGender>()",
+          sourceFile: "PatientForm.cs",
+          line: 6,
+        },
+      },
+      {
+        controlName: "listStatus",
+        source: {
+          kind: "list",
+          typeName: "PatientStatus",
+          expression: "Items.AddList(this._patientStatuses)",
+          sourceFile: "PatientForm.cs",
+          line: 7,
+        },
+      },
+      {
+        controlName: "listPosition",
+        source: {
+          kind: "list",
+          typeName: "PatientPosition",
+          expression: "Items.AddList(_positions)",
+          sourceFile: "PatientForm.cs",
+          line: 8,
+        },
+      },
+      {
+        controlName: "listRelationships",
+        source: {
+          kind: "list",
+          expression: "Items.AddList(Patients.GetRelationships(Family, _guardians))",
+          sourceFile: "PatientForm.cs",
+          line: 9,
+        },
+      },
+    ]);
+  });
+
+  it("records enum AddRange helper and Enum.GetNames item sources", () => {
+    const info = parseCodeBehind(`partial class UploadSettings {
+  void FillLists() {
+    cbProtocol.Items.AddRange(Helpers.GetEnumDescriptions<BrowserProtocol>());
+    this.cbThumbnail.Items.AddRange(App.Helpers.GetLocalizedEnumDescriptions<App.Domain.ThumbnailType>().ToArray());
+    cbEncryption.Items.AddRange(Enum.GetNames(typeof(App.Domain.EncryptionMode)));
+    cbSystemEnum.Items.AddRange(System.Enum.GetNames(typeof(StorageClass)).ToArray());
+    cbUploadUrl.Items.AddRange(Lambda.UploadURLs);
+    cbAccounts.Items.AddRange(Config.Accounts.ToArray());
+  }
+}`, "/proj/UploadSettings.cs");
+
+    expect(info.itemHints).toEqual([
+      {
+        controlName: "cbProtocol",
+        source: {
+          kind: "enum",
+          typeName: "BrowserProtocol",
+          expression: "Items.AddRange(GetEnumDescriptions<BrowserProtocol>())",
+          sourceFile: "UploadSettings.cs",
+          line: 3,
+        },
+      },
+      {
+        controlName: "cbThumbnail",
+        source: {
+          kind: "enum",
+          typeName: "ThumbnailType",
+          expression: "Items.AddRange(GetLocalizedEnumDescriptions<App.Domain.ThumbnailType>())",
+          sourceFile: "UploadSettings.cs",
+          line: 4,
+        },
+      },
+      {
+        controlName: "cbEncryption",
+        source: {
+          kind: "enum",
+          typeName: "EncryptionMode",
+          expression: "Items.AddRange(Enum.GetNames(typeof(App.Domain.EncryptionMode)))",
+          sourceFile: "UploadSettings.cs",
+          line: 5,
+        },
+      },
+      {
+        controlName: "cbSystemEnum",
+        source: {
+          kind: "enum",
+          typeName: "StorageClass",
+          expression: "Items.AddRange(Enum.GetNames(typeof(StorageClass)))",
+          sourceFile: "UploadSettings.cs",
+          line: 6,
+        },
+      },
+      {
+        controlName: "cbUploadUrl",
+        source: {
+          kind: "list",
+          expression: "Items.AddRange(Lambda.UploadURLs)",
+          sourceFile: "UploadSettings.cs",
+          line: 7,
+        },
+      },
+      {
+        controlName: "cbAccounts",
+        source: {
+          kind: "list",
+          expression: "Items.AddRange(Config.Accounts.ToArray())",
+          sourceFile: "UploadSettings.cs",
+          line: 8,
+        },
+      },
+    ]);
+  });
+
+  it("records initialization value sources with their method and model flow", () => {
+    const info = parseCodeBehind(`partial class SettingsForm {
+  public PreviewConfig Config { get; private set; }
+  SettingsForm(PreviewConfig config) {
+    Config = config;
+    InitializeView();
+  }
+  private void InitializeView() {
+    txtEndpoint.Text = Config.Endpoint;
+    cbEnabled.Checked = !Config.Disabled;
+    cbMode.SelectedIndex = (int)Config.Mode;
+    cbLiteral.SelectedIndex = 1;
+  }
+  private void cbEnabled_Click(object sender, EventArgs e) {
+    cbEnabled.Checked = false;
+  }
+}`, "/proj/SettingsForm.cs");
+
+    expect(info.methods.map((method) => method.name)).toEqual([
+      "SettingsForm", "InitializeView", "cbEnabled_Click",
+    ]);
+    expect(info.valueHints).toEqual([
+      {
+        controlName: "txtEndpoint",
+        source: expect.objectContaining({
+          property: "text",
+          expression: "Config.Endpoint",
+          methodName: "InitializeView",
+          modelType: "PreviewConfig",
+          memberPath: ["Endpoint"],
+          line: 8,
+        }),
+      },
+      {
+        controlName: "cbEnabled",
+        source: expect.objectContaining({
+          property: "checked",
+          expression: "!Config.Disabled",
+          methodName: "InitializeView",
+          modelType: "PreviewConfig",
+          memberPath: ["Disabled"],
+          negated: true,
+          line: 9,
+        }),
+      },
+      {
+        controlName: "cbMode",
+        source: expect.objectContaining({
+          property: "selectedIndex",
+          expression: "(int)Config.Mode",
+          methodName: "InitializeView",
+          modelType: "PreviewConfig",
+          memberPath: ["Mode"],
+          line: 10,
+        }),
+      },
+      {
+        controlName: "cbLiteral",
+        source: expect.objectContaining({
+          property: "selectedIndex",
+          expression: "1",
+          methodName: "InitializeView",
+          literalValue: 1,
+          line: 11,
+        }),
+      },
+      {
+        controlName: "cbEnabled",
+        source: expect.objectContaining({
+          property: "checked",
+          expression: "false",
+          methodName: "cbEnabled_Click",
+          literalValue: false,
+          line: 14,
+        }),
+      },
+    ]);
+  });
+
+  it("records direct and HandleCreated watermark calls as reusable placeholder values", () => {
+    const info = parseCodeBehind(`partial class LoginPanel {
+  LoginPanel() {
+    txtCode.HandleCreated += (sender, e) => txtCode.SetWatermark(Resources.CodeHint, true);
+    txtSearch.SetCueBanner("Search customers");
+    if (UseAdvancedHint) txtAdvanced.SetPlaceholderText(Resources.AdvancedHint);
+  }
+}`, "/proj/LoginPanel.cs");
+
+    expect(info.valueHints).toEqual([
+      {
+        controlName: "txtCode",
+        source: expect.objectContaining({
+          property: "placeholderText",
+          expression: "Resources.CodeHint",
+          methodName: "LoginPanel",
+          line: 3,
+        }),
+      },
+      {
+        controlName: "txtSearch",
+        source: expect.objectContaining({
+          property: "placeholderText",
+          expression: '"Search customers"',
+          literalValue: "Search customers",
+          methodName: "LoginPanel",
+          line: 4,
+        }),
+      },
+      {
+        controlName: "txtAdvanced",
+        source: expect.objectContaining({
+          property: "placeholderText",
+          expression: "Resources.AdvancedHint",
+          conditional: true,
+          methodName: "LoginPanel",
+          line: 5,
+        }),
+      },
+    ]);
+    expect(info.valueHints[0].source.conditional).toBeUndefined();
+  });
+
+  it("infers PropertyGrid SelectedObject types through list item flow", () => {
+    const info = parseCodeBehind(`partial class SettingsForm {
+      void RefreshAccounts() {
+        foreach (CustomerSettings account in Config.Accounts) {
+          accountList.Items.Add(account);
+        }
+      }
+      void accountList_SelectedIndexChanged() {
+        CustomerSettings copy = (CustomerSettings)accountList.Items[accountList.SelectedIndex];
+        propertyGrid.SelectedObject = accountList.Items[accountList.SelectedIndex];
+      }
+    }`, "/proj/SettingsForm.cs");
+
+    expect(info.propertyGridHints).toEqual([{
+      controlName: "propertyGrid",
+      source: {
+        typeName: "CustomerSettings",
+        expression: "accountList.Items[accountList.SelectedIndex]",
+        sourceFile: "SettingsForm.cs",
+        line: 9,
+      },
+    }]);
   });
 });

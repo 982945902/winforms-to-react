@@ -123,11 +123,13 @@ export type VisualAppearance = {
   flatStyle?: string;
   // Control state captured from Designer assignments.
   checked?: boolean;
+  checkState?: string;
   threeState?: boolean;
   readOnly?: boolean;
   multiline?: boolean;
   passwordChar?: string;
   maxLength?: number;
+  placeholderText?: string;
   dropDownStyle?: string;
   selectedIndex?: number;
   value?: string | number;
@@ -155,9 +157,102 @@ export type VisualAppearance = {
   appearanceStyle?: string;
 };
 
+export type RuntimeItemSource = {
+  kind: "enum" | "list";
+  typeName?: string;
+  expression: string;
+  sourceFile: string;
+  line: number;
+};
+
+export type RuntimeValueProperty = "text" | "checked" | "enabled" | "readOnly" | "placeholderText" | "selectedIndex" | "selectedItem" | "value";
+
+// A public property on a reusable UserControl can be a thin facade over one of
+// its child controls (for example `Mode { set { combo.SelectedIndex =
+// (int)value; } }`). Preserve that relationship once on the component
+// definition so every host instance can supply its own value without cloning
+// the component tree into each page.
+export type ComponentPropertyBinding = {
+  sourceProperty: string;
+  targetControlName: string;
+  targetProperty: RuntimeValueProperty | "visible";
+  negated?: boolean;
+  sourceFile: string;
+  line: number;
+};
+
+// A control value reached by a statically proven parameterless UserControl
+// constructor path. This is deliberately narrower than arbitrary C# execution:
+// only source literals, unique Resources strings, colors, and constant
+// if/switch branches are materialized.
+export type ComponentInitializationDefault = {
+  targetControlName: string;
+  targetProperty: RuntimeValueProperty | "visible" | "foreColor" | "backColor";
+  value: string | number | boolean | VisualColor;
+  expression: string;
+  sourceFile: string;
+  line: number;
+  methodName: string;
+  condition?: string;
+};
+
+// A code-behind assignment performed during constructor/Load/Shown
+// initialization. Model-backed values remain source contracts unless a
+// literal or a configuration-class default can be proven from project context.
+export type RuntimeValueSource = {
+  property: RuntimeValueProperty;
+  expression: string;
+  sourceFile: string;
+  line: number;
+  methodName: string;
+  modelType?: string;
+  memberPath?: string[];
+  negated?: boolean;
+  conditional?: boolean;
+  literalValue?: string | number | boolean;
+  resolvedDefault?: string | number | boolean;
+};
+
+export type RuntimeAssetSource = {
+  property: "image" | "imageKey";
+  value: string;
+  expression: string;
+  sourceFile: string;
+  line: number;
+};
+
+// Static metadata for a PropertyGrid.SelectedObject type. Values are limited
+// to literals/defaults that can be proven from attributes, property
+// initializers, or the parameterless constructor; runtime records are never
+// invented by the migration preview.
+export type PropertyGridField = {
+  name: string;
+  label: string;
+  typeName: string;
+  category?: string;
+  description?: string;
+  defaultValue?: string | number | boolean;
+  password?: boolean;
+  readOnly?: boolean;
+  hasEditor?: boolean;
+  instantiated?: boolean;
+};
+
+export type PropertyGridObjectSource = {
+  typeName?: string;
+  expression: string;
+  sourceFile: string;
+  line: number;
+  fields?: PropertyGridField[];
+};
+
 export type VisualControl = {
   kind: string;
   name: string;
+  // Declared C# type before inheritance normalization (for example
+  // OpenDental.UI.Button -> kind Button). Exporters can select a shared visual
+  // adapter without losing the neutral base-control role.
+  sourceType?: string;
   text?: string;
   bounds?: VisualBounds;
   dock?: string;
@@ -188,6 +283,16 @@ export type VisualControl = {
   treeNodeTexts?: Record<string, string>; // Variable name -> display text          // Names of root-level tree nodes
   treeNodeChildren?: Record<string, string[]>; // Parent node name -> child node names
   items?: string[];
+  // A control may be populated by more than one code-behind call. Preserve all
+  // sources; resolved enum labels are materialized into `items` separately.
+  itemSources?: RuntimeItemSource[];
+  // Initialization-time code-behind assignments. Resolved defaults are
+  // materialized separately so later backend migration keeps the dependency.
+  runtimeValueSources?: RuntimeValueSource[];
+  runtimeAssetSources?: RuntimeAssetSource[];
+  // Code-behind SelectedObject assignment plus optional context-resolved type
+  // metadata used by the native PropertyGrid preview.
+  propertyGridSource?: PropertyGridObjectSource;
   customProperties?: Array<{ name: string; type: string }>;
   // Reference to a shared custom/UserControl definition in ProjectIR.
   // Compatibility conversion may still inline controls, but target exporters
@@ -264,6 +369,50 @@ export type RuntimeTabHint = {
 
 export type RuntimeLayoutHint = RuntimeReparentHint | RuntimeTabHint;
 
+export type RuntimeVisibilityVariant = {
+  label: string;
+  hiddenControls: string[];
+  shownControls: string[];
+};
+
+export type RuntimeVisibilityGroup = {
+  condition: string;
+  defaultVariant: number;
+  variants: RuntimeVisibilityVariant[];
+  sourceFile: string;
+  line: number;
+};
+
+// A narrow, source-proven UI dependency from a wired event handler, such as
+// `details.Enabled = includeDetails.Checked`. This is presentation state, not
+// migrated business logic: only direct control-property reads (optionally
+// negated) are retained.
+export type RuntimeControlStateProperty = "checked" | "enabled" | "readOnly" | "visible";
+
+export type RuntimeControlBinding = {
+  triggerControlName: string;
+  triggerEvent: string;
+  handler: string;
+  sourceControlName: string;
+  sourceProperty: RuntimeControlStateProperty;
+  targetControlName: string;
+  targetProperty: RuntimeControlStateProperty;
+  negated?: boolean;
+  sourceFile: string;
+  line: number;
+};
+
+// Code-behind adapters such as ShareX TabToTreeView consume an existing
+// TabControl and present its pages through a separate navigation surface.
+// Preserve the relationship without depending on the custom control type.
+export type RuntimeTabNavigator = {
+  navigatorControlName: string;
+  tabControlName: string;
+  property: string;
+  sourceFile: string;
+  line: number;
+};
+
 export type EventStub = {
   controlName: string;
   event: string;
@@ -334,6 +483,9 @@ export type VisualForm = {
   navigations?: NavEdge[];
   bindings?: BindingInfo[];
   runtimeLayoutHints?: RuntimeLayoutHint[];
+  runtimeVisibilityGroups?: RuntimeVisibilityGroup[];
+  runtimeControlBindings?: RuntimeControlBinding[];
+  runtimeTabNavigators?: RuntimeTabNavigator[];
 };
 
 export type MigrationReport = {
@@ -359,7 +511,10 @@ export type ComponentDefinition = {
   typeName: string;
   sourcePath?: string;
   status: "resolved" | "external";
+  clientSize?: VisualSize;
   controls: VisualControl[];
+  propertyBindings?: ComponentPropertyBinding[];
+  initializationDefaults?: ComponentInitializationDefault[];
   layout?: NormalizedLayoutPlan;
   instanceCount: number;
   support?: FormSupportSummary;
