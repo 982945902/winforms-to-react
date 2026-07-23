@@ -1,0 +1,27 @@
+{
+  "$schema": "./schema.json",
+  "schemaVersion": 1,
+  "id": "opendental-patient-edit-client-v1",
+  "page": "FormPatientEdit",
+  "backend": { "baseUrl": "http://127.0.0.1:5199" },
+  "operations": [
+    {
+      "operationId": "clearPatientDeceasedDate",
+      "handler": "butClearDateTimeDeceased_Click",
+      "trigger": { "controlName": "butClearDateTimeDeceased", "event": "Click" },
+      "execution": "client",
+      "intent": "Clear the deceased date without a server round trip.",
+      "capabilities": ["ui"],
+      "effect": { "kind": "set-value", "targetControl": "textDateTimeDeceased", "targetProperty": "text", "value": "" }
+    },
+    {
+      "operationId": "clearFrequentZipSelection",
+      "handler": "textZip_TextChanged",
+      "trigger": { "controlName": "textZip", "event": "TextChanged" },
+      "execution": "client",
+      "intent": "Clear the frequent ZIP selection when the ZIP text changes.",
+      "capabilities": ["ui"],
+      "effect": { "kind": "set-value", "targetControl": "comboZip", "targetProperty": "selectedIndex", "value": -1 }
+    }
+  ]
+}

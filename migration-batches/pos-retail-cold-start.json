@@ -1,0 +1,23 @@
+{
+  "$schema": "./schema.json",
+  "id": "pos-retail-cold-start",
+  "description": "Previously unseen WinForms and SQL Server retail application used as a cold-start portability gate.",
+  "source": {
+    "repository": "https://github.com/bilalmehrban/Point-of-Sale-Desktop-Csharp-.git",
+    "revision": "ddf9e7b812abfc0d2b30ab860a8c8854139203b9"
+  },
+  "files": [
+    "POS/UI/Catagories.Designer.cs",
+    "POS/UI/Form1.Designer.cs",
+    "POS/UI/Invoice Details.Designer.cs",
+    "POS/UI/Login.Designer.cs",
+    "POS/UI/Manage Products.Designer.cs",
+    "POS/UI/Sales Analytics.Designer.cs",
+    "POS/UI/Stock.Designer.cs",
+    "POS/UI/Suppliers.Designer.cs",
+    "POS/UI/Users.Designer.cs",
+    "POS/UI/Sales Man/Form1.Designer.cs",
+    "POS/UI/Sales Man/Return.Designer.cs",
+    "POS/UI/Sales Man/Sale Register.Designer.cs"
+  ]
+}

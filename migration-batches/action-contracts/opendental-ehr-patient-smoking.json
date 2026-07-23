@@ -1,0 +1,129 @@
+{
+  "$schema": "./schema.json",
+  "schemaVersion": 1,
+  "id": "opendental-ehr-patient-smoking-batchability-v1",
+  "page": "FormEhrPatientSmoking",
+  "backend": { "baseUrl": "http://127.0.0.1:5199" },
+  "operations": [
+    {
+      "operationId": "loadSmokingWorkspace",
+      "handler": "FormPatientSmoking_Load",
+      "trigger": { "controlName": "FormEhrPatientSmoking", "event": "Load" },
+      "execution": "server",
+      "intent": "Load current smoking state, lookup options, assessments and interventions through one page-level contract.",
+      "capabilities": ["data", "ui"],
+      "transport": { "method": "GET", "path": "/api/batchability/smoking" },
+      "response": {
+        "bindings": [
+          { "source": "smokeStatuses", "targetControl": "comboSmokeStatus", "target": "options", "labelField": "label", "valueField": "value" },
+          { "source": "tobaccoStatuses", "targetControl": "comboTobaccoStatus", "target": "options", "labelField": "label", "valueField": "value" },
+          { "source": "assessmentTypes", "targetControl": "comboAssessmentType", "target": "options", "labelField": "label", "valueField": "value" },
+          { "source": "interventionCodes", "targetControl": "comboInterventionCode", "target": "options", "labelField": "label", "valueField": "value" },
+          { "source": "current.smokeStatus", "targetControl": "comboSmokeStatus", "target": "value" },
+          { "source": "current.tobaccoStatus", "targetControl": "comboTobaccoStatus", "target": "value" },
+          { "source": "current.patientDeclined", "targetControl": "checkPatientDeclined", "target": "value" },
+          {
+            "source": "assessments",
+            "targetControl": "gridAssessments",
+            "target": "rows",
+            "rowIdField": "id",
+            "columnFields": {
+              "gridAssessmentsRuntimeColumn1": "date",
+              "gridAssessmentsRuntimeColumn2": "type",
+              "gridAssessmentsRuntimeColumn3": "description",
+              "gridAssessmentsRuntimeColumn4": "documentation"
+            }
+          },
+          {
+            "source": "interventions",
+            "targetControl": "gridInterventions",
+            "target": "rows",
+            "rowIdField": "id",
+            "columnFields": {
+              "gridInterventionsRuntimeColumn1": "date",
+              "gridInterventionsRuntimeColumn2": "type",
+              "gridInterventionsRuntimeColumn3": "description",
+              "gridInterventionsRuntimeColumn4": "declined",
+              "gridInterventionsRuntimeColumn5": "documentation"
+            }
+          },
+          { "source": "status", "target": "status" }
+        ]
+      }
+    },
+    {
+      "operationId": "filterSmokingInterventionCodes",
+      "handler": "radioInterventions_CheckedChanged",
+      "triggers": [
+        { "controlName": "radioRecentInterventions", "event": "CheckedChanged" },
+        { "controlName": "radioAllInterventions", "event": "CheckedChanged" },
+        { "controlName": "radioMedInterventions", "event": "CheckedChanged" },
+        { "controlName": "radioCounselInterventions", "event": "CheckedChanged" }
+      ],
+      "execution": "server",
+      "intent": "Reuse one handler-level mapping for every intervention filter radio button.",
+      "capabilities": ["ui"],
+      "transport": { "method": "POST", "path": "/api/batchability/smoking/intervention-codes" },
+      "request": {
+        "fields": [
+          { "name": "filterControl", "sourceControl": "FormEhrPatientSmoking", "source": "trigger-control", "parse": "string" }
+        ]
+      },
+      "response": {
+        "bindings": [
+          { "source": "options", "targetControl": "comboInterventionCode", "target": "options", "labelField": "label", "valueField": "value" },
+          { "source": "status", "target": "status" }
+        ]
+      }
+    },
+    {
+      "operationId": "filterSmokingTobaccoStatuses",
+      "handler": "radioTobaccoStatuses_CheckedChanged",
+      "triggers": [
+        { "controlName": "radioRecentStatuses", "event": "CheckedChanged" },
+        { "controlName": "radioAllStatuses", "event": "CheckedChanged" },
+        { "controlName": "radioNonUserStatuses", "event": "CheckedChanged" },
+        { "controlName": "radioUserStatuses", "event": "CheckedChanged" }
+      ],
+      "execution": "server",
+      "intent": "Reuse one handler-level mapping for every tobacco-status filter radio button.",
+      "capabilities": ["ui"],
+      "transport": { "method": "POST", "path": "/api/batchability/smoking/tobacco-statuses" },
+      "request": {
+        "fields": [
+          { "name": "filterControl", "sourceControl": "FormEhrPatientSmoking", "source": "trigger-control", "parse": "string" }
+        ]
+      },
+      "response": {
+        "bindings": [
+          { "source": "options", "targetControl": "comboTobaccoStatus", "target": "options", "labelField": "label", "valueField": "value" },
+          { "source": "status", "target": "status" }
+        ]
+      }
+    },
+    {
+      "operationId": "saveSmokingState",
+      "handler": "butSave_Click",
+      "trigger": { "controlName": "butSave", "event": "Click" },
+      "execution": "server",
+      "intent": "Persist the current smoking status through a server-owned data contract.",
+      "capabilities": ["data", "validation", "ui"],
+      "transport": { "method": "POST", "path": "/api/batchability/smoking" },
+      "request": {
+        "fields": [
+          { "name": "smokeStatus", "sourceControl": "comboSmokeStatus", "source": "selected-value", "parse": "string" },
+          { "name": "tobaccoStatus", "sourceControl": "comboTobaccoStatus", "source": "selected-value", "parse": "string" },
+          { "name": "patientDeclined", "sourceControl": "checkPatientDeclined", "source": "checked", "parse": "boolean" }
+        ]
+      },
+      "response": {
+        "bindings": [
+          { "source": "current.smokeStatus", "targetControl": "comboSmokeStatus", "target": "value" },
+          { "source": "current.tobaccoStatus", "targetControl": "comboTobaccoStatus", "target": "value" },
+          { "source": "current.patientDeclined", "targetControl": "checkPatientDeclined", "target": "value" },
+          { "source": "message", "target": "status" }
+        ]
+      }
+    }
+  ]
+}

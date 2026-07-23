@@ -16,6 +16,18 @@ export type MigrationHint = {
   lineStart: number;
   lineEnd: number;
   calledSymbols: string[];
+  transitiveCalledSymbols?: string[];
+  propertyReads?: string[];
+  assignedSymbols?: string[];
+  constructedTypes?: string[];
+  awaitedCalls?: string[];
+  valueWrites?: Array<{
+    controlName: string;
+    property: RuntimeValueProperty;
+    expression: string;
+    conditional?: boolean;
+    literalValue?: string | number | boolean;
+  }>;
 };
 
 export type VisualEvent = {
@@ -40,6 +52,58 @@ export type BindingInfo = {
 export type ContractPoint = MigrationHint & {
   controlName: string;
   event: string;
+};
+
+export type ActionCapability = "data" | "filesystem" | "external-service" | "security" | "navigation" | "validation" | "ui";
+
+export type ActionContractFieldBinding = {
+  name: string;
+  sourceControl: string;
+  source: "value" | "checked" | "selected-value" | "selected-values" | "selected-rows" | "trigger-control";
+  parse?: "string" | "integer" | "boolean" | "string-array" | "integer-array";
+};
+
+export type ActionContractResponseBinding = {
+  source: string;
+  targetControl?: string;
+  target: "options" | "visibility" | "value" | "rows" | "artifact" | "status";
+  labelField?: string;
+  valueField?: string;
+  rowIdField?: string;
+  columnFields?: Record<string, string>;
+};
+
+export type ActionContractEffect =
+  | { kind: "select-all" | "clear-all" | "focus" | "copy-value"; targetControl: string }
+  | { kind: "set-value"; targetControl: string; targetProperty?: "text" | "checked" | "selectedIndex" | "value"; value: string | number | boolean }
+  | { kind: "transform-value"; targetControl: string; transform: "uppercase" | "lowercase" | "trim" };
+
+export type ActionContractOperation = {
+  operationId: string;
+  handler: string;
+  trigger: { controlName: string; event: string };
+  triggers?: Array<{ controlName: string; event: string }>;
+  execution: "server" | "client";
+  intent: string;
+  capabilities: ActionCapability[];
+  transport?: {
+    method: "GET" | "POST";
+    path: string;
+  };
+  request?: { fields: ActionContractFieldBinding[] };
+  response?: { bindings: ActionContractResponseBinding[] };
+  effect?: ActionContractEffect;
+};
+
+export type ActionContractPlan = {
+  schemaVersion: 1;
+  id: string;
+  page: string;
+  backend: {
+    baseUrl: string;
+    openApiPath?: string;
+  };
+  operations: ActionContractOperation[];
 };
 
 export type VisualColumn = {
@@ -130,6 +194,7 @@ export type VisualAppearance = {
   passwordChar?: string;
   maxLength?: number;
   placeholderText?: string;
+  toolTipText?: string;
   dropDownStyle?: string;
   selectedIndex?: number;
   value?: string | number;
@@ -165,7 +230,7 @@ export type RuntimeItemSource = {
   line: number;
 };
 
-export type RuntimeValueProperty = "text" | "checked" | "enabled" | "readOnly" | "placeholderText" | "selectedIndex" | "selectedItem" | "value";
+export type RuntimeValueProperty = "text" | "checked" | "enabled" | "readOnly" | "placeholderText" | "toolTipText" | "selectedIndex" | "selectedItem" | "value";
 
 // A public property on a reusable UserControl can be a thin facade over one of
 // its child controls (for example `Mode { set { combo.SelectedIndex =
@@ -534,5 +599,6 @@ export type ProjectIR = {
   pages: VisualForm[];
   components: ComponentDefinition[];
   assets: ProjectAsset[];
+  actionContracts?: ActionContractPlan[];
   report: MigrationReport;
 };

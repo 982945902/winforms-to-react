@@ -31,6 +31,7 @@ const SAMPLE_RESX = `<?xml version="1.0" encoding="utf-8"?>
   <data name="btnOK.ForeColor" type="System.Drawing.Color, System.Drawing"><value>Navy</value></data>
   <data name="btnOK.BorderStyle" type="System.Windows.Forms.BorderStyle, System.Windows.Forms"><value>FixedSingle</value></data>
   <data name="btnOK.TextAlign" type="System.Drawing.ContentAlignment, System.Drawing"><value>MiddleLeft</value></data>
+  <data name="btnOK.ToolTip" xml:space="preserve"><value>Save this record&#10;and close the window.</value></data>
   <data name="btnOK.RightToLeft" type="System.Windows.Forms.RightToLeft, System.Windows.Forms"><value>Yes</value></data>
   <data name="btnOK.MinimumSize" type="System.Drawing.Size, System.Drawing"><value>70, 20</value></data>
   <data name="btnOK.MaximumSize" type="System.Drawing.Size, System.Drawing"><value>100, 30</value></data>
@@ -86,6 +87,7 @@ describe("resxParser", () => {
       expect(btnProps.rightToLeft).toBe("Yes");
       expect(btnProps.minimumSize).toEqual({ width: 70, height: 20 });
       expect(btnProps.maximumSize).toEqual({ width: 100, height: 30 });
+      expect(btnProps.toolTipText).toBe("Save this record\nand close the window.");
 
       expect(applyResxToProps("txtNotes", data)).toEqual(expect.objectContaining({
         readOnly: true,

@@ -1,0 +1,31 @@
+{
+  "$schema": "./schema.json",
+  "id": "opendental-patient",
+  "description": "OpenDental patient lifecycle, portal, selection, merge, and EHR forms used by Frontend Batch Gate v0.7.",
+  "source": {
+    "repository": "https://github.com/OpenDental/opendental.git",
+    "revision": "d804c19546233593d8a66af0591ed118a9e2c794"
+  },
+  "actionContracts": [
+    "action-contracts/opendental-ehr-patient-export.json",
+    "action-contracts/opendental-ehr-patient-smoking.json",
+    "action-contracts/opendental-advertising-patient-list.json",
+    "action-contracts/opendental-patient-edit-client.json",
+    "action-contracts/opendental-eservices-patient-portal-client.json",
+    "action-contracts/opendental-patient-status-tool-client.json"
+  ],
+  "files": [
+    "OpenDental/Forms/FormPatientEdit.Designer.cs",
+    "OpenDental/Forms/FormAdvertisingPatientList.Designer.cs",
+    "OpenDental/Forms/FormEhrPatientSmoking.Designer.cs",
+    "OpenDental/Forms/FormEServicesPatientPortal.designer.cs",
+    "OpenDental/Forms/FormPatientPickWebForm.designer.cs",
+    "OpenDental/Forms/FormPatientMerge.designer.cs",
+    "OpenDental/Forms/FormPatientStatusTool.designer.cs",
+    "OpenDental/Forms/FormPatientForms.designer.cs",
+    "OpenDental/Forms/FormEhrPatientExport.designer.cs",
+    "OpenDental/Forms/FormPatientPortal.Designer.cs",
+    "OpenDental/Forms/FormEhrPatientSelectSimple.Designer.cs",
+    "OpenDental/Forms/FormEhrPatientConfidentialPrefEdit.Designer.cs"
+  ]
+}

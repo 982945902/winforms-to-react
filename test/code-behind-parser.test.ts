@@ -28,6 +28,25 @@ namespace App {
 `;
 
 describe("parseCodeBehind", () => {
+  it("records declared field receiver types without confusing method locals for fields", () => {
+    const info = parseCodeBehind(`namespace App {
+      partial class OrdersForm : System.Windows.Forms.Form {
+        private readonly OrderGateway gateway = new OrderGateway();
+        AuditSink audit;
+        void RefreshRows() {
+          TemporaryGateway local = new TemporaryGateway();
+          gateway.Read();
+        }
+      }
+    }`, "/proj/OrdersForm.cs");
+
+    expect(info.fields).toEqual([
+      expect.objectContaining({ ownerType: "OrdersForm", name: "gateway", typeName: "OrderGateway" }),
+      expect.objectContaining({ ownerType: "OrdersForm", name: "audit", typeName: "AuditSink" }),
+    ]);
+    expect(info.fields.some((field) => field.name === "local")).toBe(false);
+  });
+
   it("extracts handlers with C# 8+ nullable sender/args signatures", () => {
     const src = `using System; using System.Windows.Forms;
 public partial class N : Form {
@@ -57,6 +76,35 @@ public partial class C : Form {
     expect(btn?.calledSymbols).toContain("GetService");
     expect(btn?.calledSymbols).toContain("Repository.Query");
     expect(btn?.calledSymbols).toContain("Plain");
+  });
+
+  it("captures property, assignment, construction, and awaited-call evidence", () => {
+    const src = `using System; using System.Threading.Tasks; using System.Windows.Forms;
+public partial class PatientForm : Form {
+    private async void buttonSave_Click(object sender, EventArgs e) {
+        textName.Text = patient.Name;
+        var dialog = new DetailForm();
+        await PatientService.SaveAsync(patient);
+    }
+}`;
+    const info = parseCodeBehind(src, "/proj/PatientForm.cs");
+    const handler = info.handlers.find((item) => item.handler === "buttonSave_Click");
+    expect(handler?.assignedSymbols).toContain("textName.Text");
+    expect(handler?.propertyReads).toContain("patient.Name");
+    expect(handler?.constructedTypes).toContain("DetailForm");
+    expect(handler?.awaitedCalls).toContain("PatientService.SaveAsync");
+    expect(handler?.valueWrites).toContainEqual({ controlName: "textName", property: "text", expression: "patient.Name" });
+  });
+
+  it("captures null-conditional calls instead of mistaking them for no-ops", () => {
+    const src = `using System; using System.Windows.Forms;
+public partial class DashboardForm : Form {
+    private void buttonRefresh_Click(object sender, EventArgs e) {
+        _dashboard?.RefreshContent();
+    }
+}`;
+    const info = parseCodeBehind(src, "/proj/DashboardForm.cs");
+    expect(info.handlers[0].calledSymbols).toContain("_dashboard.RefreshContent");
   });
 
   it("extracts event handlers with line ranges and called symbols", () => {
@@ -265,6 +313,45 @@ public partial class C : Form {
       sourceFile: "F.cs",
       line: 3,
     }]);
+  });
+
+  it("records conditional TabPages.Remove calls as neutral visibility variants", () => {
+    const info = parseCodeBehind(`partial class SettingsForm {
+      void LoadFields() {
+        if (preferences.HideAdvanced) {
+          settingsTabs.TabPages.Remove(advancedTab);
+        }
+        if (preferences.ShowAudit) {
+          auditLabel.Visible = true;
+        }
+        else {
+          settingsTabs.TabPages.Remove(auditTab);
+        }
+      }
+    }`, "/proj/SettingsForm.cs");
+
+    expect(info.visibilityGroups).toEqual([
+      {
+        condition: "preferences.HideAdvanced",
+        defaultVariant: 0,
+        variants: [
+          { label: "preferences.HideAdvanced", hiddenControls: ["advancedTab"], shownControls: [] },
+          { label: "not (preferences.HideAdvanced)", hiddenControls: [], shownControls: ["advancedTab"] },
+        ],
+        sourceFile: "SettingsForm.cs",
+        line: 3,
+      },
+      {
+        condition: "preferences.ShowAudit",
+        defaultVariant: 1,
+        variants: [
+          { label: "preferences.ShowAudit", hiddenControls: [], shownControls: ["auditLabel", "auditTab"] },
+          { label: "not (preferences.ShowAudit)", hiddenControls: ["auditTab"], shownControls: [] },
+        ],
+        sourceFile: "SettingsForm.cs",
+        line: 6,
+      },
+    ]);
   });
 
   it("records only direct source-proven control state dependencies", () => {
@@ -554,6 +641,33 @@ partial class PatientForm {
     expect(info.valueHints[0].source.conditional).toBeUndefined();
   });
 
+  it("records literal, resource, and unresolved ToolTip extender calls", () => {
+    const info = parseCodeBehind(`partial class ToolTips {
+  ToolTips() {
+    help.SetToolTip(buttonSave, "Save, then close");
+    help.SetToolTip(labelAccount, Resources.AccountHelp);
+  }
+  private void RefreshHelp() {
+    help.SetToolTip(textStatus, result.Message);
+  }
+}`, "/proj/ToolTips.cs");
+
+    expect(info.valueHints).toEqual([
+      {
+        controlName: "buttonSave",
+        source: expect.objectContaining({ property: "toolTipText", expression: '"Save, then close"', literalValue: "Save, then close", methodName: "ToolTips" }),
+      },
+      {
+        controlName: "labelAccount",
+        source: expect.objectContaining({ property: "toolTipText", expression: "Resources.AccountHelp", methodName: "ToolTips" }),
+      },
+      {
+        controlName: "textStatus",
+        source: expect.objectContaining({ property: "toolTipText", expression: "result.Message", methodName: "RefreshHelp" }),
+      },
+    ]);
+  });
+
   it("infers PropertyGrid SelectedObject types through list item flow", () => {
     const info = parseCodeBehind(`partial class SettingsForm {
       void RefreshAccounts() {
@@ -576,5 +690,33 @@ partial class PatientForm {
         line: 9,
       },
     }]);
+  });
+
+  it("extracts reusable custom-grid columns and top-level custom-menu items", () => {
+    const info = parseCodeBehind(`partial class PatientForm {
+      const string PATIENT_COLUMN="Patient Name";
+      void FillGrid() {
+        gridMain.Columns.Clear();
+        GridColumn column;
+        column=new GridColumn(Lan.g(this,PATIENT_COLUMN),200);
+        gridMain.Columns.Add(column);
+        gridMain.Columns.Add(new GridColumn(Lan.g(this,"Birthdate"),70));
+      }
+      void LayoutMenu() {
+        MenuItemOD setup=new MenuItemOD("Setup");
+        menuMain.Add(setup);
+        menuSecondary.Add(new MenuItemOD("Export",menuExport_Click));
+      }
+      void menuExport_Click(object sender, EventArgs e) { Export(); }
+    }`, "/proj/PatientForm.cs");
+
+    expect(info.gridColumnHints).toEqual([
+      { controlName: "gridMain", column: { name: "gridMainRuntimeColumn1", headerText: "Patient Name", width: 200, kind: "GridColumn" } },
+      { controlName: "gridMain", column: { name: "gridMainRuntimeColumn2", headerText: "Birthdate", width: 70, kind: "GridColumn" } },
+    ]);
+    expect(info.menuItemHints).toEqual([
+      { controlName: "menuMain", text: "Setup" },
+      { controlName: "menuSecondary", text: "Export", handler: "menuExport_Click" },
+    ]);
   });
 });

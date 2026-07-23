@@ -8,6 +8,35 @@ import type { VisualControl } from "../src/ir/types.js";
 import { parseTabPageAssetRelations } from "../src/parser/tabPageAssetCatalog.js";
 
 describe("TabPage service assets", () => {
+  it("selects the same lexically first source when duplicate asset basenames exist", async () => {
+    const root = await mkdtemp(join(tmpdir(), "wf2-duplicate-assets-"));
+    try {
+      await mkdir(join(root, "a"));
+      await mkdir(join(root, "z"));
+      const designer = join(root, "AssetForm.Designer.cs");
+      await writeFile(designer, `partial class AssetForm {
+        private System.Windows.Forms.Button button1;
+        private void InitializeComponent() {
+          this.button1 = new System.Windows.Forms.Button();
+          this.button1.Image = Properties.Resources.centerline;
+          this.Controls.Add(this.button1);
+        }
+      }`, "utf8");
+      await writeFile(join(root, "AssetForm.cs"), "partial class AssetForm : System.Windows.Forms.Form { }", "utf8");
+      await writeFile(join(root, "a", "centerline.png"), Buffer.from([1]), "binary");
+      await writeFile(join(root, "z", "centerline.png"), Buffer.from([2]), "binary");
+
+      const first = await buildProjectIR(designer, { contextRoot: root });
+      const second = await buildProjectIR(designer, { contextRoot: root });
+      expect(first.assets).toEqual(second.assets);
+      expect(first.assets).toContainEqual(expect.objectContaining({
+        key: "centerline", sourcePath: join(root, "a", "centerline.png"),
+      }));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("pairs Resources-backed service icons with config TabPages inside the same class", () => {
     const relations = parseTabPageAssetRelations(`
       class CloudUploaderService : UploaderService {

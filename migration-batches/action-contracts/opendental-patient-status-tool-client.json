@@ -1,0 +1,27 @@
+{
+  "$schema": "./schema.json",
+  "schemaVersion": 1,
+  "id": "opendental-patient-status-tool-client-v1",
+  "page": "FormPatientStatusTool",
+  "backend": { "baseUrl": "http://127.0.0.1:5199" },
+  "operations": [
+    {
+      "operationId": "selectAllPatientStatusRows",
+      "handler": "butSelectAll_Click",
+      "trigger": { "controlName": "butSelectAll", "event": "Click" },
+      "execution": "client",
+      "intent": "Select all currently loaded patient-status rows without a server round trip.",
+      "capabilities": ["ui"],
+      "effect": { "kind": "select-all", "targetControl": "gridMain" }
+    },
+    {
+      "operationId": "clearAllPatientStatusRows",
+      "handler": "butDeselectAll_Click",
+      "trigger": { "controlName": "butDeselectAll", "event": "Click" },
+      "execution": "client",
+      "intent": "Clear the current patient-status row selection without a server round trip.",
+      "capabilities": ["ui"],
+      "effect": { "kind": "clear-all", "targetControl": "gridMain" }
+    }
+  ]
+}

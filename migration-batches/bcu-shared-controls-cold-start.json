@@ -1,0 +1,19 @@
+{
+  "$schema": "./schema.json",
+  "id": "bcu-shared-controls-cold-start",
+  "description": "Cold-start portability gate for repeated Designer-backed UserControl definitions across complex WinForms hosts.",
+  "source": {
+    "repository": "https://github.com/BCUninstaller/Bulk-Crap-Uninstaller.git",
+    "revision": "f39663316ad5d593c4d160b0445841ce7eb6a35f"
+  },
+  "files": [
+    "source/BulkCrapUninstaller/Forms/Windows/MainWindow.Designer.cs",
+    "source/BulkCrapUninstaller/Forms/Windows/SettingsWindow.Designer.cs",
+    "source/BulkCrapUninstaller/Forms/Wizards/BeginUninstallTaskWizard.Designer.cs",
+    "source/BulkCrapUninstaller/Forms/Helpers/TargetWindow.Designer.cs",
+    "source/KlocTools/Forms/WindowTargeterDialog.Designer.cs",
+    "source/KlocTools/Forms/ProcessWaiter.Designer.cs",
+    "source/NBug_custom/Core/UI/Developer/InternalExceptionViewer.Designer.cs",
+    "source/NBug_custom/Core/UI/WinForms/Full.Designer.cs"
+  ]
+}

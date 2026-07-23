@@ -1,19 +1,38 @@
 import type { ProjectIR, VisualControl, VisualForm } from "../ir/types.js";
+import { emptyWorkspacePreviewFixture, gitExtensionsWorkspaceFixture } from "./migrationVisualProfileFixtures.js";
 
 type PageVisualProfile = "gitextensions-workspace" | "opendental";
 
 const gitComponentAdapters: Record<string, string> = {
-  TextEditorControl: "git-diff",
-  RevisionDiffControl: "git-revision-diff",
-  RevisionGridControl: "git-revision-grid",
-  RepoObjectsTree: "git-repository-tree",
-  CommitInfo: "git-commit-info",
-  RevisionGpgInfoControl: "git-gpg-info",
-  InteractiveGitActionControl: "git-action",
-  FilterToolBar: "git-filter-toolbar",
-  MenuStripEx: "git-menu-strip",
-  ToolStripEx: "git-tool-strip",
+  TextEditorControl: "diff",
+  RevisionDiffControl: "revision-diff",
+  RevisionGridControl: "revision-grid",
+  RepoObjectsTree: "repository-tree",
+  CommitInfo: "commit-info",
+  RevisionGpgInfoControl: "signature-info",
+  InteractiveGitActionControl: "action-progress",
+  FilterToolBar: "filter-toolbar",
+  MenuStripEx: "menu-strip",
+  ToolStripEx: "tool-strip",
 };
+
+const openDentalComponentAdapters: Record<string, string> = {
+  GridOD: "data-grid",
+  MenuOD: "menu-bar",
+};
+
+export function migrationComponentAdapters(project: ProjectIR): Record<string, string> {
+  const hasWorkspaceProfile = project.pages.some((page) => detectPageProfile(page) === "gitextensions-workspace");
+  const hasOpenDentalProfile = project.pages.some((page) => detectPageProfile(page) === "opendental");
+  const entries: Array<[string, string]> = [];
+  for (const component of project.components) {
+    const adapter = hasWorkspaceProfile ? gitComponentAdapters[component.id] : undefined;
+    const openDentalAdapter = hasOpenDentalProfile ? openDentalComponentAdapters[component.id] : undefined;
+    const selected = adapter || openDentalAdapter;
+    if (selected) entries.push([component.id, selected]);
+  }
+  return Object.fromEntries(entries);
+}
 
 export function migrationVisualProfilesTsx(project: ProjectIR): string {
   const pageProfiles = new Map<string, PageVisualProfile>();
@@ -32,9 +51,27 @@ export function migrationVisualProfilesTsx(project: ProjectIR): string {
     // Scope the short form to a page already identified by its FormODBase chain.
     .filter((typeName) => /^(?:OpenDental\.|UI\.)/.test(typeName)))]
     .sort();
-  const componentAdapters = Object.fromEntries(project.components
-    .map((component) => [component.id, gitComponentAdapters[component.id]] as const)
-    .filter((entry): entry is [string, string] => Boolean(entry[1])));
+  const hasWorkspaceProfile = [...pageProfiles.values()].includes("gitextensions-workspace");
+  const hasOpenDentalProfile = [...pageProfiles.values()].includes("opendental");
+  const componentAdapters = migrationComponentAdapters(project);
+  const workspaceFixture = hasWorkspaceProfile ? gitExtensionsWorkspaceFixture() : emptyWorkspacePreviewFixture();
+  const pageProfileDefinitions: Record<string, Record<string, unknown>> = {};
+  if (hasWorkspaceProfile) pageProfileDefinitions["gitextensions-workspace"] = {
+      layoutMode: "semantic", canvasMode: "workspace", presentationClass: "native-workspace-form",
+      titleFromWorkspace: true, appIconImageKey: "GitLogo16", appIconFallback: "↗",
+      keyboardShortcuts: true, treeRole: "file-status",
+    };
+  if (hasOpenDentalProfile) pageProfileDefinitions.opendental = {
+      layoutMode: "fixed", canvasMode: "fixed-padded", presentationClass: "native-fixed-form native-od-form",
+      titlebarClass: "native-od-titlebar",
+    };
+  const controlVisualClasses = openDentalTypes.map((typeName) => [typeName, {
+    Button: typeName.endsWith(".Button") ? "native-od-button" : "",
+    ComboBox: typeName.endsWith(".ComboBox") ? "native-od-combo" : "",
+    GroupBox: typeName.endsWith(".GroupBox") ? "native-od-groupbox" : "",
+    ListBox: typeName.endsWith(".ListBox") ? "native-od-list-box" : "",
+    TabControl: typeName.endsWith(".TabControl") ? "native-od-tabs" : "",
+  }]);
 
   const profileComponents = openDentalProfileComponents(openDentalTypes);
   return `import React from "react";
@@ -47,11 +84,42 @@ export type ProfileVisualProps = {
   label?: string;
   items?: string[];
   selected?: string;
+  checked?: boolean;
+  onCheckedChange?: (checked: boolean) => void;
 };
 
 const pageProfiles = new Map<string, string>(${JSON.stringify([...pageProfiles], null, 2)});
 const controlProfiles = new Map<string, string>(${JSON.stringify(openDentalTypes.map((typeName) => [typeName, "opendental"]), null, 2)});
 const componentAdapters = new Map<string, string>(${JSON.stringify(Object.entries(componentAdapters), null, 2)});
+export const workspacePreviewFixture: any = ${JSON.stringify(workspaceFixture, null, 2)};
+
+const pageProfileDefinitions: Record<string, any> = ${JSON.stringify(pageProfileDefinitions, null, 2)};
+const controlVisualClasses = new Map<string, Record<string, string>>(${JSON.stringify(controlVisualClasses, null, 2)});
+
+export function pageVisualProfile(page: any): any {
+  return pageProfileDefinitions[pageProfiles.get(String(page?.name || "")) || ""] || {
+    layoutMode: "fixed", canvasMode: "fixed", presentationClass: "native-fixed-form",
+  };
+}
+
+export function controlVisualClass(control: Control, slot: string): string {
+  return controlVisualClasses.get(normalizeSourceType(control?.sourceType))?.[slot] || "";
+}
+
+export function profileControlText(control: Control): string | undefined {
+  return workspacePreviewFixture.controlText?.[String(control?.name || "")];
+}
+
+export function profileControlGlyph(control: Control): string {
+  const name = String(control?.name || "");
+  const entry = (workspacePreviewFixture.controlGlyphs || []).find((item: any) => new RegExp(item.pattern, "i").test(name));
+  return entry?.glyph || "";
+}
+
+export function profileToolbarShowsText(control: Control): boolean {
+  const name = String(control?.name || "");
+  return (workspacePreviewFixture.toolbarTextPatterns || []).some((pattern: string) => new RegExp(pattern, "i").test(name));
+}
 
 export function pageUsesVisualProfile(page: any, profile: string): boolean {
   return pageProfiles.get(String(page?.name || "")) === profile;
@@ -65,7 +133,7 @@ export function controlUsesVisualProfile(control: Control, profile: string, type
 
 export function componentVisualAdapter(componentId: string, control: Control): string | undefined {
   const adapter = componentAdapters.get(componentId);
-  if (adapter === "git-revision-diff" && /filetree/i.test(String(control?.name || ""))) return "git-file-tree";
+  if (adapter === "revision-diff" && /filetree/i.test(String(control?.name || ""))) return "file-tree";
   return adapter;
 }
 
@@ -193,19 +261,20 @@ function openDentalProfileComponents(sourceTypes: string[]): { source: string; e
       .map((typeName) => `  [${JSON.stringify(typeName)}, OpenDentalClinicPicker],`));
   }
   if (has("CheckBox")) {
-    components.push(`function OpenDentalCheckBox({ control, style, text = "" }: ProfileVisualProps) {
+    components.push(`function OpenDentalCheckBox({ control, style, text = "", checked: controlledChecked, onCheckedChange }: ProfileVisualProps) {
   const initialState = String(control.appearance?.checkState || "");
-  const [checked, setChecked] = React.useState(control.appearance?.checked === true || /Checked|Indeterminate/i.test(initialState));
+  const [localChecked, setLocalChecked] = React.useState(control.appearance?.checked === true || /Checked|Indeterminate/i.test(initialState));
   const [indeterminate, setIndeterminate] = React.useState(/Indeterminate/i.test(initialState));
+  const checked = controlledChecked ?? localChecked;
   const disabled = control.appearance?.enabled === false;
   const threeState = control.appearance?.threeState === true;
   const autoCheck = control.properties?.AutoCheck !== false;
   const right = control.appearance?.checkAlign?.horizontal === "Right";
   const toggle = () => {
     if (disabled || !autoCheck) return;
-    if (!checked) { setChecked(true); setIndeterminate(false); return; }
+    if (!checked) { setLocalChecked(true); onCheckedChange?.(true); setIndeterminate(false); return; }
     if (threeState && !indeterminate) { setIndeterminate(true); return; }
-    setChecked(false); setIndeterminate(false);
+    setLocalChecked(false); onCheckedChange?.(false); setIndeterminate(false);
   };
   return <label style={style} className={"migration-check native-od-checkbox" + (right ? " check-right" : "") + (disabled ? " disabled" : "")}>
     <input type="checkbox" checked={checked} disabled={disabled} tabIndex={control.properties?.TabStop === false ? -1 : 0}

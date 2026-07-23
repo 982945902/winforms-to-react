@@ -14,22 +14,27 @@ ${entries}
 `;
 }
 
-export function migrationSurfaceTsx(projectIr: ProjectIR): string {
-  const assetEntries = projectIr.assets
+export function migrationVisualAssetsTs(project: ProjectIR): string {
+  const assetEntries = project.assets
     .map((asset) => `  ${JSON.stringify(asset.key)}: new URL(${JSON.stringify(`../assets/${asset.targetFileName}`)}, import.meta.url).href,`)
     .join("\n");
+  return `export const visualAssets: Record<string, string> = {
+${assetEntries}
+};
+`;
+}
+
+export function migrationSurfaceTsx(_projectIr: ProjectIR): string {
   return `import React from "react";
+import { createPortal } from "react-dom";
 import { Button, Checkbox, Input, InputNumber, Radio, Select, Tag } from "antd";
 import project from "../generated/project.ir.json";
-import { componentVisualAdapter, controlUsesVisualProfile, pageUsesVisualProfile, profileVisualComponent } from "./visualProfiles";
+import { visualAssets } from "./visualAssets";
+import { componentVisualAdapter, controlVisualClass, pageVisualProfile, profileControlGlyph, profileControlText, profileToolbarShowsText, profileVisualComponent, workspacePreviewFixture } from "./visualProfiles";
 
 type Control = any;
 type DefinitionAdapterProps = { control: Control; depth?: number; registry?: Record<string, React.ComponentType<DefinitionAdapterProps>> };
 type LayoutNode = any;
-
-const visualAssets: Record<string, string> = {
-${assetEntries}
-};
 
 const definitions = new Map((project.components as any[]).map((item) => [item.id, item]));
 const RuntimeVisibilityContext = React.createContext<ReadonlySet<Control>>(new Set());
@@ -56,13 +61,7 @@ const previewFilePaths = [...new Set([
   ...(project.components as any[]).map((item) => item.sourcePath),
 ].filter(Boolean).map((value) => String(value).replace(/\\\\/g, "/").split("/").slice(-2).join("/")))].slice(0, 6);
 
-const previewRepository = {
-  name: "gitextensions_5",
-  branch: "tmp/reword1",
-  path: "C:" + String.fromCharCode(92) + ["dev", "gc", "gitextensions_5"].join(String.fromCharCode(92)) + String.fromCharCode(92),
-  version: "f0344e66 (tmp/go9-6)",
-  dirtyCount: 1,
-};
+const previewRepository = workspacePreviewFixture.repository;
 
 type PreviewRevision = {
   id: string;
@@ -79,16 +78,12 @@ type PreviewRevision = {
   artificial: boolean;
   statusIcon?: string;
 };
-const previewRevisions: PreviewRevision[] = [
-  { id: "worktree", graph: "status", refs: ["Working directory"], subject: "+ 1", author: "", email: "", committer: "", date: "", hash: "", parent: "9f9d9cf", artificial: true, statusIcon: "RepoStateDirty" },
-  { id: "index", graph: "status", refs: ["Commit index"], subject: "", author: "", email: "", committer: "", date: "", hash: "", parent: "9f9d9cf", artificial: true, statusIcon: "RepoStateStaged" },
-  { id: "25f6b60", graph: "main", refs: ["tmp/reword1"], subject: "Show multirevision diff also with no HEAD (#9947)", author: "Gerhard Olsson", email: "6248932+gerhardol@users.noreply.github.com", committer: "GitHub", date: "2022-04-29 21:14:28", hash: "25f6b60", parent: "f3e5c63", artificial: false },
-  { id: "9f9d9cf", graph: "side", refs: ["master", "upstream/master"], subject: "Show multi revision diff also with no HEAD (#9947)", author: "Gerhard Olsson", email: "6248932+gerhardol@users.noreply.github.com", committer: "GitHub", date: "2022-04-29 21:14:28", hash: "9f9d9cf", fullHash: "9f9d9cf7c1ee11777197f6131024c0abd17d0e00", parent: "f3e5c63", artificial: false },
-  { id: "f3e5c63", graph: "merge", refs: [], subject: "Left panel: reverted menu icon scaling", author: "Holger Schmidt", email: "hschmidt@users.noreply.github.com", committer: "Holger Schmidt", date: "2022-04-29 13:06:57", hash: "f3e5c63", parent: "14471c3", artificial: false },
-  { id: "14471c3", graph: "main", refs: [], subject: "Show no changes in grid for artificial commits", author: "Gerhard Olsson", email: "6248932+gerhardol@users.noreply.github.com", committer: "Gerhard Olsson", date: "2022-04-29 00:43:21", hash: "14471c3", parent: "18d7ac4", artificial: false },
-  { id: "18d7ac4", graph: "main", refs: ["v4.2.0"], subject: "Improve revision grid layout", author: "GitExtensions", email: "team@gitextensions.org", committer: "GitExtensions", date: "2022-04-28 18:35:04", hash: "18d7ac4", parent: "b42c0f1", artificial: false },
-  { id: "b42c0f1", graph: "main", refs: [], subject: "Refresh repository objects after fetch", author: "Contributor", email: "contributor@users.noreply.github.com", committer: "Contributor", date: "2022-04-28 10:17:39", hash: "b42c0f1", parent: "830c2e7", artificial: false },
-];
+const previewRevisions: PreviewRevision[] = workspacePreviewFixture.revisions;
+const emptyPreviewRevision: PreviewRevision = {
+  id: "preview", graph: "status", refs: ["Preview"], subject: "", author: "", email: "", committer: "",
+  date: "", hash: "", parent: "", artificial: true,
+};
+const initialPreviewRevision = previewRevisions[3] || previewRevisions[0] || emptyPreviewRevision;
 type PreviewRuntimeState = {
   revision: PreviewRevision;
   setRevision: (revision: PreviewRevision) => void;
@@ -109,8 +104,8 @@ type PreviewRuntimeState = {
   runCommand: (label: string) => void;
 };
 const PreviewRuntimeContext = React.createContext<PreviewRuntimeState>({
-  revision: previewRevisions[3], setRevision: () => undefined,
-  selectedRevisionIds: [previewRevisions[3].id], setSelectedRevisionIds: () => undefined,
+  revision: initialPreviewRevision, setRevision: () => undefined,
+  selectedRevisionIds: [initialPreviewRevision.id], setSelectedRevisionIds: () => undefined,
   revisionFilter: "", setRevisionFilter: () => undefined,
   branchFilter: "", setBranchFilter: () => undefined,
   revisionScope: "All branches", setRevisionScope: () => undefined,
@@ -120,9 +115,284 @@ const PreviewRuntimeContext = React.createContext<PreviewRuntimeState>({
   runCommand: () => undefined,
 });
 
+type ActionRuntimeOption = { label: string; value: unknown };
+type ActionRuntimeGrid = { rows: any[]; rowIdField?: string; columnFields?: Record<string, string> };
+type ActionRuntimeState = {
+  enabled: boolean;
+  busy: boolean;
+  values: Record<string, unknown>;
+  options: Record<string, ActionRuntimeOption[]>;
+  visibility: Record<string, boolean>;
+  grids: Record<string, ActionRuntimeGrid>;
+  selectedRows: Record<string, unknown[]>;
+  setValue: (controlName: string, value: unknown) => void;
+  toggleRow: (controlName: string, rowId: unknown) => void;
+  invoke: (controlName: string, eventName: string, handler?: string) => boolean;
+};
+const ActionRuntimeContext = React.createContext<ActionRuntimeState>({
+  enabled: false, busy: false, values: {}, options: {}, visibility: {}, grids: {}, selectedRows: {},
+  setValue: () => undefined, toggleRow: () => undefined, invoke: () => false,
+});
+
+function useActionRuntime() {
+  return React.useContext(ActionRuntimeContext);
+}
+
+function responseValue(payload: any, path: string): any {
+  return String(path || "").split(".").filter(Boolean).reduce((value, part) => value == null ? undefined : value[part], payload);
+}
+
+function findActionControl(controls: any[], controlName: string): any | undefined {
+  for (const control of controls || []) {
+    if (control.name === controlName) return control;
+    const child = findActionControl(control.children || [], controlName);
+    if (child) return child;
+  }
+  return undefined;
+}
+
+function clientSetValue(page: any, options: Record<string, ActionRuntimeOption[]>, effect: any): unknown {
+  if (effect.targetProperty !== "selectedIndex") return effect.value;
+  const index = Number(effect.value);
+  if (!Number.isInteger(index) || index < 0) return undefined;
+  const dynamic = options[effect.targetControl];
+  if (dynamic) return dynamic[index]?.value;
+  return findActionControl(page.controls || [], effect.targetControl)?.items?.[index];
+}
+
+function parseActionValue(raw: unknown, parser?: string): unknown {
+  if (parser === "string") return raw == null ? "" : String(raw);
+  if (parser === "integer") {
+    if (raw === undefined || raw === null || raw === "") return null;
+    const value = Number(raw);
+    return Number.isFinite(value) ? Math.trunc(value) : null;
+  }
+  if (parser === "boolean") return Boolean(raw);
+  if (parser === "string-array") return (Array.isArray(raw) ? raw : []).map((value) => String(value));
+  if (parser === "integer-array") return (Array.isArray(raw) ? raw : []).map(Number).filter(Number.isFinite).map(Math.trunc);
+  return raw;
+}
+
+function actionErrorMessage(payload: any, status: number): string {
+  if (typeof payload?.message === "string") return payload.message;
+  if (Array.isArray(payload?.errors)) return payload.errors.map(String).join(" · ");
+  if (typeof payload?.code === "string") return payload.code;
+  return "Request failed (HTTP " + status + ")";
+}
+
+function ActionRuntimeProvider({ page, children }: { page: any; children: React.ReactNode }) {
+  const plan: any = ((project as any).actionContracts as any[] | undefined)?.find((candidate) => candidate.page === page.name);
+  const enabled = Boolean(plan) && typeof window !== "undefined" && new URLSearchParams(window.location.search).get("wfActions") === "1";
+  const [values, setValues] = React.useState<Record<string, unknown>>({});
+  const [options, setOptions] = React.useState<Record<string, ActionRuntimeOption[]>>({});
+  const [visibility, setVisibility] = React.useState<Record<string, boolean>>({});
+  const [grids, setGrids] = React.useState<Record<string, ActionRuntimeGrid>>({});
+  const [selectedRows, setSelectedRows] = React.useState<Record<string, unknown[]>>({});
+  const [busy, setBusy] = React.useState(false);
+  const [status, setStatus] = React.useState("");
+  const [error, setError] = React.useState("");
+  const [artifact, setArtifact] = React.useState("");
+  const [warnings, setWarnings] = React.useState<string[]>([]);
+  const pendingRetry = React.useRef<{ operation: any; body: Record<string, unknown> } | null>(null);
+  const requestControllers = React.useRef(new Map<string, AbortController>());
+  const loadedPlan = React.useRef("");
+  const valuesRef = React.useRef(values);
+  const optionsRef = React.useRef(options);
+  const gridsRef = React.useRef(grids);
+  const selectedRowsRef = React.useRef(selectedRows);
+  React.useEffect(() => { valuesRef.current = values; }, [values]);
+  React.useEffect(() => { optionsRef.current = options; }, [options]);
+  React.useEffect(() => { gridsRef.current = grids; }, [grids]);
+  React.useEffect(() => { selectedRowsRef.current = selectedRows; }, [selectedRows]);
+  React.useEffect(() => {
+    for (const controller of requestControllers.current.values()) controller.abort();
+    requestControllers.current.clear();
+    setValues({}); setOptions({}); setVisibility({}); setGrids({}); setSelectedRows({});
+    valuesRef.current = {}; optionsRef.current = {}; gridsRef.current = {}; selectedRowsRef.current = {};
+    setBusy(false); setStatus(""); setError(""); setArtifact(""); setWarnings([]);
+    pendingRetry.current = null; loadedPlan.current = "";
+  }, [page.name, plan?.id, enabled]);
+  React.useEffect(() => () => {
+    for (const controller of requestControllers.current.values()) controller.abort();
+    requestControllers.current.clear();
+  }, []);
+
+  const execute = React.useCallback(async (operation: any, suppliedBody?: Record<string, unknown>, triggerControlName?: string) => {
+    if (!enabled || !plan) return;
+    if (operation.execution === "client") {
+      setError("");
+      try {
+        if (operation.effect?.kind === "select-all") {
+        const target = String(operation.effect.targetControl);
+        const grid = gridsRef.current[target];
+        const rowIdField = grid?.rowIdField;
+        const rowIds = rowIdField ? (grid?.rows || []).map((row) => responseValue(row, rowIdField)) : [];
+        setSelectedRows((current) => ({ ...current, [target]: rowIds.filter((value) => value !== undefined && value !== null) }));
+        setStatus(rowIds.length + " row(s) selected.");
+      } else if (operation.effect?.kind === "clear-all") {
+        const target = String(operation.effect.targetControl);
+        setSelectedRows((current) => ({ ...current, [target]: [] }));
+        setStatus("Selection cleared.");
+      } else if (operation.effect?.kind === "set-value") {
+        const target = String(operation.effect.targetControl);
+        const value = clientSetValue(page, optionsRef.current, operation.effect);
+        setValues((current) => ({ ...current, [target]: value }));
+        valuesRef.current = { ...valuesRef.current, [target]: value };
+        setStatus(target + " updated.");
+      } else if (operation.effect?.kind === "transform-value") {
+        const target = String(operation.effect.targetControl);
+        const currentValue = String(valuesRef.current[target] ?? "");
+        const nextValue = operation.effect.transform === "uppercase" ? currentValue.toLocaleUpperCase()
+          : operation.effect.transform === "lowercase" ? currentValue.toLocaleLowerCase() : currentValue.trim();
+        valuesRef.current = { ...valuesRef.current, [target]: nextValue };
+        setValues(valuesRef.current);
+        setStatus(target + " normalized.");
+      } else if (operation.effect?.kind === "copy-value") {
+        const target = String(operation.effect.targetControl);
+        const host = Array.from(document.querySelectorAll<HTMLElement>("[data-control]"))
+          .find((element) => element.dataset.control === target);
+        const input = host?.querySelector<HTMLInputElement | HTMLTextAreaElement>("input, textarea");
+        const value = String(valuesRef.current[target] ?? input?.value ?? "");
+        await navigator.clipboard.writeText(value);
+        setStatus(target + " copied to clipboard.");
+        } else if (operation.effect?.kind === "focus") {
+        const target = String(operation.effect.targetControl);
+        const host = Array.from(document.querySelectorAll<HTMLElement>("[data-control]"))
+          .find((element) => element.dataset.control === target);
+        const focusable = host?.querySelector<HTMLElement>("input, textarea, button, [tabindex]") || host;
+        focusable?.focus();
+        setStatus(target + " focused.");
+        }
+      } catch (effectError) {
+        setError(effectError instanceof Error ? effectError.message : String(effectError));
+        setStatus("");
+      }
+      return;
+    }
+    const body = suppliedBody || Object.fromEntries((operation.request?.fields || []).map((field: any) => {
+      const raw = field.source === "trigger-control"
+        ? triggerControlName || operation.trigger.controlName
+        : field.source === "selected-rows"
+        ? selectedRowsRef.current[field.sourceControl] || []
+        : valuesRef.current[field.sourceControl];
+      return [field.name, parseActionValue(raw, field.parse)];
+    }));
+    const requestKey = String(operation.operationId || operation.handler);
+    requestControllers.current.get(requestKey)?.abort();
+    const requestController = new AbortController();
+    requestControllers.current.set(requestKey, requestController);
+    setBusy(true); setError(""); setWarnings([]);
+    try {
+      const url = new URL(operation.transport.path, plan.backend.baseUrl).href;
+      const response = await fetch(url, {
+        method: operation.transport.method,
+        headers: operation.transport.method === "POST" ? { "Content-Type": "application/json" } : undefined,
+        body: operation.transport.method === "POST" ? JSON.stringify(body) : undefined,
+        signal: requestController.signal,
+      });
+      const text = await response.text();
+      let payload: any = {};
+      if (text) {
+        try { payload = JSON.parse(text); } catch { payload = { message: text }; }
+      }
+      if (response.status === 409 && payload?.code === "warnings-require-confirmation") {
+        const nextWarnings = Array.isArray(payload.warnings) ? payload.warnings.map(String) : [];
+        pendingRetry.current = { operation, body };
+        setWarnings(nextWarnings);
+        setStatus("Export produced warnings and needs confirmation.");
+        return;
+      }
+      if (!response.ok) throw new Error(actionErrorMessage(payload, response.status));
+      let nextStatus = operation.operationId + " complete.";
+      for (const binding of operation.response?.bindings || []) {
+        const value = responseValue(payload, binding.source);
+        if (binding.target === "options" && binding.targetControl) {
+          const list = Array.isArray(value) ? value : [];
+          setOptions((current) => ({ ...current, [binding.targetControl]: list.map((item: any) => ({
+            label: String(responseValue(item, binding.labelField || "label") ?? ""),
+            value: responseValue(item, binding.valueField || "value"),
+          })) }));
+        } else if (binding.target === "visibility" && binding.targetControl) {
+          setVisibility((current) => ({ ...current, [binding.targetControl]: Boolean(value) }));
+        } else if (binding.target === "value" && binding.targetControl) {
+          setValues((current) => ({ ...current, [binding.targetControl]: value }));
+        } else if (binding.target === "rows" && binding.targetControl) {
+          setGrids((current) => ({ ...current, [binding.targetControl]: {
+            rows: Array.isArray(value) ? value : [], rowIdField: binding.rowIdField, columnFields: binding.columnFields,
+          } }));
+          setSelectedRows((current) => ({ ...current, [binding.targetControl]: [] }));
+        } else if (binding.target === "artifact") {
+          setArtifact(value ? new URL(String(value), plan.backend.baseUrl).href : "");
+        } else if (binding.target === "status") {
+          nextStatus = value == null ? "" : String(value);
+        }
+      }
+      pendingRetry.current = null;
+      setWarnings([]);
+      setStatus(nextStatus);
+    } catch (requestError) {
+      if (requestController.signal.aborted) return;
+      const message = requestError instanceof Error ? requestError.message : String(requestError);
+      setError(message);
+      setStatus("");
+    } finally {
+      if (requestControllers.current.get(requestKey) === requestController) {
+        requestControllers.current.delete(requestKey);
+        setBusy(requestControllers.current.size > 0);
+      }
+    }
+  }, [enabled, page, plan]);
+
+  React.useEffect(() => {
+    if (!enabled || !plan || loadedPlan.current === plan.id) return;
+    loadedPlan.current = plan.id;
+    const load = plan.operations.find((operation: any) => (operation.triggers || [operation.trigger])
+      .some((trigger: any) => trigger.controlName === page.name && trigger.event === "Load"));
+    if (load) void execute(load, undefined, page.name);
+  }, [enabled, execute, page.name, plan]);
+
+  const setValue = React.useCallback((controlName: string, value: unknown) => {
+    valuesRef.current = { ...valuesRef.current, [controlName]: value };
+    setValues(valuesRef.current);
+  }, []);
+  const toggleRow = React.useCallback((controlName: string, rowId: unknown) => {
+    setSelectedRows((current) => {
+      const selected = current[controlName] || [];
+      return { ...current, [controlName]: selected.some((value) => Object.is(value, rowId))
+        ? selected.filter((value) => !Object.is(value, rowId)) : [...selected, rowId] };
+    });
+  }, []);
+  const invoke = React.useCallback((controlName: string, eventName: string, handler?: string): boolean => {
+    if (!enabled || !plan) return false;
+    const operation = plan.operations.find((candidate: any) => (candidate.triggers || [candidate.trigger])
+      .some((trigger: any) => trigger.controlName === controlName && trigger.event === eventName)
+      && (!handler || candidate.handler === handler));
+    if (!operation) return false;
+    void execute(operation, undefined, controlName);
+    return true;
+  }, [enabled, execute, plan]);
+  const retry = () => {
+    const pending = pendingRetry.current;
+    if (pending) void execute(pending.operation, { ...pending.body, acceptWarnings: true });
+  };
+  const context = React.useMemo(() => ({ enabled, busy, values, options, visibility, grids, selectedRows, setValue, toggleRow, invoke }),
+    [enabled, busy, values, options, visibility, grids, selectedRows, setValue, toggleRow, invoke]);
+  return <ActionRuntimeContext.Provider value={context}>
+    {children}
+    {enabled && (busy || status || error || artifact || warnings.length > 0) && <aside className={"action-contract-panel" + (error ? " has-error" : "")} aria-live="polite">
+      <strong>{busy ? "Working…" : error ? "Action failed" : "Connected action"}</strong>
+      {status && <span>{status}</span>}
+      {error && <span>{error}</span>}
+      {warnings.length > 0 && <ul>{warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>}
+      {warnings.length > 0 && <button type="button" onClick={retry} disabled={busy}>Confirm and export</button>}
+      {artifact && <a href={artifact}>Download export ZIP</a>}
+    </aside>}
+  </ActionRuntimeContext.Provider>;
+}
+
 function PreviewRuntimeProvider({ children }: { children: React.ReactNode }) {
-  const [revision, setRevision] = React.useState(previewRevisions[3]);
-  const [selectedRevisionIds, setSelectedRevisionIds] = React.useState([previewRevisions[3].id]);
+  const [revision, setRevision] = React.useState(initialPreviewRevision);
+  const [selectedRevisionIds, setSelectedRevisionIds] = React.useState([initialPreviewRevision.id]);
   const [revisionFilter, setRevisionFilter] = React.useState("");
   const [branchFilter, setBranchFilter] = React.useState("");
   const [revisionScope, setRevisionScope] = React.useState("All branches");
@@ -158,17 +428,19 @@ export function createDefinitionAdapter(componentId: string) {
     }
     if (definition.status === "external") {
       const profileAdapter = componentVisualAdapter(componentId, control);
-      if (profileAdapter === "git-diff") return <DiffPreview />;
-      if (profileAdapter === "git-file-tree") return <FileTreePreview />;
-      if (profileAdapter === "git-revision-diff") return <RevisionDiffPreview />;
-      if (profileAdapter === "git-revision-grid") return <RevisionGridPreview />;
-      if (profileAdapter === "git-repository-tree") return <RepositoryTreePreview />;
-      if (profileAdapter === "git-commit-info") return <CommitInfoPreview />;
-      if (profileAdapter === "git-gpg-info") return <GpgInfoPreview />;
-      if (profileAdapter === "git-action") return <GitActionPreview control={control} />;
-      if (profileAdapter === "git-filter-toolbar") return <FilterToolbarPreview />;
-      if (profileAdapter === "git-menu-strip") return <NativeMenuBar controls={control.children || []} />;
-      if (profileAdapter === "git-tool-strip") return <NativeToolStrip control={control} />;
+      if (profileAdapter === "data-grid") return <SemanticDataGrid control={control} />;
+      if (profileAdapter === "menu-bar") return <SemanticMenuBar control={control} />;
+      if (profileAdapter === "diff") return <DiffPreview />;
+      if (profileAdapter === "file-tree") return <FileTreePreview />;
+      if (profileAdapter === "revision-diff") return <RevisionDiffPreview />;
+      if (profileAdapter === "revision-grid") return <RevisionGridPreview />;
+      if (profileAdapter === "repository-tree") return <RepositoryTreePreview />;
+      if (profileAdapter === "commit-info") return <CommitInfoPreview />;
+      if (profileAdapter === "signature-info") return <SignatureInfoPreview />;
+      if (profileAdapter === "action-progress") return <ActionProgressPreview control={control} />;
+      if (profileAdapter === "filter-toolbar") return <FilterToolbarPreview />;
+      if (profileAdapter === "menu-strip") return <NativeMenuBar controls={control.children || []} />;
+      if (profileAdapter === "tool-strip") return <NativeToolStrip control={control} />;
       if (/(?:DatePicker|DateEdit|DateInput)$/i.test(componentId)) return <SemanticDateInput control={control} />;
       if (/(?:Phone|TextBox|TextEdit|MemoEdit)$/i.test(componentId)) return <SemanticTextInput control={control} />;
       if (/(?:ComboBox|Lookup|Picker|Selector)/i.test(componentId)) return <SemanticComboInput control={control} />;
@@ -274,6 +546,272 @@ function RuntimeControlStateProvider({ page, index, children }: { page: any; ind
   return <RuntimeControlStateContext.Provider value={context}>{children}</RuntimeControlStateContext.Provider>;
 }
 
+function SourceToolTip({ text, children }: { text?: string; children: React.ReactNode }) {
+  const [position, setPosition] = React.useState<{ x: number; y: number } | null>(null);
+  const pending = React.useRef({ x: 0, y: 0 });
+  const timer = React.useRef<number | null>(null);
+  const clear = React.useCallback(() => {
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = null;
+    setPosition(null);
+  }, []);
+  React.useEffect(() => clear, [clear]);
+  if (!text) return <>{children}</>;
+  const remember = (event: React.PointerEvent<HTMLSpanElement>) => {
+    pending.current = {
+      x: Math.max(4, Math.min(event.clientX + 14, window.innerWidth - 360)),
+      y: event.clientY > window.innerHeight - 110 ? Math.max(4, event.clientY - 82) : event.clientY + 20,
+    };
+  };
+  const open = (event: React.PointerEvent<HTMLSpanElement>) => {
+    remember(event);
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setPosition(pending.current), 500);
+  };
+  return <span className="source-tooltip-event-host" onPointerEnter={open} onPointerMove={remember} onPointerLeave={clear} onPointerDown={clear}>
+    {children}
+    {position && createPortal(<span className="native-source-tooltip" role="tooltip" style={{ left: position.x, top: position.y }}>{text}</span>, document.body)}
+  </span>;
+}
+
+function SourceGeometryProbe({ control, normalized, children }: { control: Control; normalized: boolean; children: React.ReactNode }) {
+  const coordinateSpace = React.useContext(RuntimeCoordinateSpaceContext);
+  const bounds = control.bounds;
+  if (normalized || !bounds) return <>{children}</>;
+  return <span className="source-geometry-probe"
+    data-source-control={control.name} data-source-kind={control.kind}
+    data-source-x={bounds.x} data-source-y={bounds.y}
+    data-source-width={bounds.width} data-source-height={bounds.height}
+    data-source-space-width={coordinateSpace.width} data-source-space-height={coordinateSpace.height}>{children}</span>;
+}
+
+type GeometryRect = { x: number; y: number; width: number; height: number };
+type GeometryAuditIssueType = "size" | "position" | "out-of-bounds" | "clipped" | "overlap";
+type GeometryAuditIssue = {
+  type: GeometryAuditIssueType;
+  control: string;
+  kind: string;
+  peer?: string;
+  expected: GeometryRect;
+  actual: GeometryRect;
+  maxDelta: number;
+  message: string;
+};
+type GeometryAuditResult = { checked: number; issues: GeometryAuditIssue[] };
+const emptyGeometryAudit: GeometryAuditResult = { checked: 0, issues: [] };
+
+export type MigrationAcceptanceDecision = "pass" | "accepted-difference" | "blocked";
+export type MigrationAcceptanceRecord = {
+  schemaVersion: 1;
+  pageName: string;
+  pageTitle: string;
+  variantKey: string;
+  variantLabels: string[];
+  decision: MigrationAcceptanceDecision;
+  notes: string;
+  recordedAt: string;
+  viewport: { width: number; height: number };
+  geometry: GeometryAuditResult & { byType: Record<string, number> };
+};
+export type MigrationAcceptanceImportResult = { imported: number; rejected: number };
+const acceptanceStorageKey = "wf2.frontend-acceptance.v1";
+
+export function readMigrationAcceptanceRecords(): MigrationAcceptanceRecord[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const value = JSON.parse(window.localStorage.getItem(acceptanceStorageKey) || "[]");
+    return Array.isArray(value) ? value.filter(isMigrationAcceptanceRecord) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveMigrationAcceptanceRecord(record: MigrationAcceptanceRecord): void {
+  if (typeof window === "undefined") return;
+  const records = readMigrationAcceptanceRecords();
+  const key = record.pageName + "::" + record.variantKey;
+  const next = [...records.filter((item) => item.pageName + "::" + item.variantKey !== key), record]
+    .sort((left, right) => left.pageName.localeCompare(right.pageName) || left.variantKey.localeCompare(right.variantKey));
+  window.localStorage.setItem(acceptanceStorageKey, JSON.stringify(next));
+  window.dispatchEvent(new CustomEvent("wf-acceptance-updated", { detail: record }));
+}
+
+export function importMigrationAcceptanceEvidence(payload: unknown): MigrationAcceptanceImportResult {
+  if (typeof window === "undefined") return { imported: 0, rejected: 0 };
+  const candidates = Array.isArray(payload) ? payload
+    : payload && typeof payload === "object" && Array.isArray((payload as any).records) ? (payload as any).records : undefined;
+  if (!candidates) return { imported: 0, rejected: 1 };
+  const imported = new Map<string, MigrationAcceptanceRecord>();
+  let rejected = 0;
+  for (const candidate of candidates) {
+    if (!isMigrationAcceptanceRecord(candidate)) { rejected += 1; continue; }
+    imported.set(candidate.pageName + "::" + candidate.variantKey, candidate);
+  }
+  const merged = new Map(readMigrationAcceptanceRecords().map((record) => [record.pageName + "::" + record.variantKey, record]));
+  for (const [key, record] of imported) merged.set(key, record);
+  const records = [...merged.values()].sort((left, right) => left.pageName.localeCompare(right.pageName) || left.variantKey.localeCompare(right.variantKey));
+  window.localStorage.setItem(acceptanceStorageKey, JSON.stringify(records));
+  const result = { imported: imported.size, rejected };
+  window.dispatchEvent(new CustomEvent("wf-acceptance-updated", { detail: result }));
+  return result;
+}
+
+export function downloadMigrationAcceptanceEvidence(payload: unknown): void {
+  if (typeof window === "undefined") return;
+  const blob = new Blob([JSON.stringify(payload, null, 2) + "\\n"], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = "frontend-acceptance-evidence.json";
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function isMigrationAcceptanceRecord(value: unknown): value is MigrationAcceptanceRecord {
+  if (!value || typeof value !== "object") return false;
+  const record = value as any;
+  if (record.schemaVersion !== 1 || typeof record.pageName !== "string" || !record.pageName
+    || typeof record.pageTitle !== "string" || typeof record.variantKey !== "string" || !record.variantKey
+    || !Array.isArray(record.variantLabels) || record.variantLabels.some((label: unknown) => typeof label !== "string")
+    || !["pass", "accepted-difference", "blocked"].includes(record.decision) || typeof record.notes !== "string"
+    || typeof record.recordedAt !== "string" || !Number.isFinite(Date.parse(record.recordedAt))) return false;
+  if (record.decision !== "pass" && !record.notes.trim()) return false;
+  if (!record.viewport || !Number.isFinite(record.viewport.width) || record.viewport.width <= 0
+    || !Number.isFinite(record.viewport.height) || record.viewport.height <= 0) return false;
+  if (!record.geometry || !Number.isInteger(record.geometry.checked) || record.geometry.checked <= 0
+    || !Array.isArray(record.geometry.issues)) return false;
+  if (record.geometry.issues.some((issue: unknown) => !issue || typeof issue !== "object" || typeof (issue as any).type !== "string")) return false;
+  return record.decision !== "pass" || record.geometry.issues.length === 0;
+}
+
+function geometryElement(probe: HTMLElement): HTMLElement | null {
+  let element = probe.firstElementChild as HTMLElement | null;
+  while (element && window.getComputedStyle(element).display === "contents") {
+    element = element.firstElementChild as HTMLElement | null;
+  }
+  return element;
+}
+
+function overlapSize(left: GeometryRect, right: GeometryRect): { width: number; height: number } {
+  return {
+    width: Math.max(0, Math.min(left.x + left.width, right.x + right.width) - Math.max(left.x, right.x)),
+    height: Math.max(0, Math.min(left.y + left.height, right.y + right.height) - Math.max(left.y, right.y)),
+  };
+}
+
+function clippedDelta(element: HTMLElement, surface: HTMLElement): number {
+  const rect = element.getBoundingClientRect();
+  let clipped = 0;
+  let parent = element.parentElement;
+  while (parent && parent !== surface) {
+    const style = window.getComputedStyle(parent);
+    const clipsX = /hidden|clip/.test(style.overflowX || style.overflow);
+    const clipsY = /hidden|clip/.test(style.overflowY || style.overflow);
+    if (clipsX || clipsY) {
+      const parentRect = parent.getBoundingClientRect();
+      if (clipsX) clipped = Math.max(clipped, parentRect.left - rect.left, rect.right - parentRect.right);
+      if (clipsY) clipped = Math.max(clipped, parentRect.top - rect.top, rect.bottom - parentRect.bottom);
+    }
+    parent = parent.parentElement;
+  }
+  return Math.max(0, Number(clipped.toFixed(1)));
+}
+
+function auditSourceGeometry(surface: HTMLElement, tolerance = 4): GeometryAuditResult {
+  const issues: GeometryAuditIssue[] = [];
+  const measured: Array<{
+    probe: HTMLElement; element: HTMLElement; control: string; kind: string;
+    expected: GeometryRect; actual: GeometryRect; offsetParent: Element | null;
+  }> = [];
+  let checked = 0;
+  for (const probe of Array.from(surface.querySelectorAll<HTMLElement>(".source-geometry-probe"))) {
+    const element = geometryElement(probe);
+    if (!element) continue;
+    const rect = element.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) continue;
+    const expected = {
+      x: Number(probe.dataset.sourceX || 0), y: Number(probe.dataset.sourceY || 0),
+      width: Number(probe.dataset.sourceWidth || 0), height: Number(probe.dataset.sourceHeight || 0),
+    };
+    const actual = {
+      x: Number(element.offsetLeft.toFixed(1)), y: Number(element.offsetTop.toFixed(1)),
+      width: Number(rect.width.toFixed(1)), height: Number(rect.height.toFixed(1)),
+    };
+    const control = String(probe.dataset.sourceControl || "control");
+    const kind = String(probe.dataset.sourceKind || "Control");
+    checked += 1;
+    measured.push({ probe, element, control, kind, expected, actual, offsetParent: element.offsetParent });
+    const sizeDelta = Math.max(Math.abs(actual.width - expected.width), Math.abs(actual.height - expected.height));
+    if (sizeDelta > tolerance) issues.push({ type: "size", control, kind, expected, actual,
+      maxDelta: Number(sizeDelta.toFixed(1)), message: \`尺寸 \${expected.width}×\${expected.height} → \${actual.width}×\${actual.height}\` });
+    const positionDelta = Math.max(Math.abs(actual.x - expected.x), Math.abs(actual.y - expected.y));
+    if (positionDelta > tolerance) issues.push({ type: "position", control, kind, expected, actual,
+      maxDelta: Number(positionDelta.toFixed(1)), message: \`位置 (\${expected.x},\${expected.y}) → (\${actual.x},\${actual.y})\` });
+
+    const spaceWidth = Number(probe.dataset.sourceSpaceWidth);
+    const spaceHeight = Number(probe.dataset.sourceSpaceHeight);
+    const sourceInside = Number.isFinite(spaceWidth) && Number.isFinite(spaceHeight)
+      && expected.x >= -tolerance && expected.y >= -tolerance
+      && expected.x + expected.width <= spaceWidth + tolerance && expected.y + expected.height <= spaceHeight + tolerance;
+    const overflow = sourceInside ? Math.max(
+      -actual.x, -actual.y, actual.x + actual.width - spaceWidth, actual.y + actual.height - spaceHeight,
+    ) : 0;
+    if (overflow > tolerance) issues.push({ type: "out-of-bounds", control, kind, expected, actual,
+      maxDelta: Number(overflow.toFixed(1)), message: \`实际控件超出 \${spaceWidth}×\${spaceHeight} 父坐标空间\` });
+    const clipped = sourceInside ? clippedDelta(element, surface) : 0;
+    if (clipped > tolerance) issues.push({ type: "clipped", control, kind, expected, actual,
+      maxDelta: clipped, message: \`被 overflow 容器裁剪 \${clipped}px\` });
+  }
+
+  for (let leftIndex = 0; leftIndex < measured.length; leftIndex += 1) {
+    const left = measured[leftIndex];
+    if (!left.offsetParent) continue;
+    for (let rightIndex = leftIndex + 1; rightIndex < measured.length; rightIndex += 1) {
+      const right = measured[rightIndex];
+      if (left.offsetParent !== right.offsetParent) continue;
+      const expectedOverlap = overlapSize(left.expected, right.expected);
+      if (expectedOverlap.width > tolerance && expectedOverlap.height > tolerance) continue;
+      const actualOverlap = overlapSize(left.actual, right.actual);
+      if (actualOverlap.width <= tolerance || actualOverlap.height <= tolerance) continue;
+      const overlap = Math.min(actualOverlap.width, actualOverlap.height);
+      issues.push({ type: "overlap", control: left.control, peer: right.control, kind: left.kind,
+        expected: left.expected, actual: left.actual, maxDelta: Number(overlap.toFixed(1)),
+        message: \`与 \${right.control} 非预期重叠 \${actualOverlap.width.toFixed(1)}×\${actualOverlap.height.toFixed(1)}px\` });
+    }
+  }
+  issues.sort((left, right) => right.maxDelta - left.maxDelta || left.type.localeCompare(right.type) || left.control.localeCompare(right.control));
+  return { checked, issues };
+}
+
+function useSourceGeometryAudit(surface: React.RefObject<HTMLElement | null>, enabled: boolean, auditKey: string): GeometryAuditResult {
+  const [result, setResult] = React.useState<GeometryAuditResult>(emptyGeometryAudit);
+  React.useEffect(() => {
+    if (!enabled) {
+      setResult(emptyGeometryAudit);
+      return;
+    }
+    let frame = 0;
+    const run = () => {
+      if (surface.current) setResult(auditSourceGeometry(surface.current));
+    };
+    const schedule = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(run);
+    };
+    schedule();
+    const coordinateSpace = surface.current?.querySelector(".native-fixed-client");
+    const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(schedule);
+    if (coordinateSpace) observer?.observe(coordinateSpace);
+    window.addEventListener("resize", schedule);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener("resize", schedule);
+    };
+  }, [surface, enabled, auditKey]);
+  return result;
+}
+
 function applyRuntimeControlBindings(control: Control, state: RuntimeControlStateContextValue): Control {
   const bindings = state.bindingsByTarget.get(control.name) || [];
   if (!bindings.length) return control;
@@ -288,6 +826,7 @@ function applyRuntimeControlBindings(control: Control, state: RuntimeControlStat
 
 function NativeCommandButton({ control, style, normalized, text }: { control: Control; style: React.CSSProperties; normalized: boolean; text: string }) {
   const controlIndex = React.useContext(RuntimeControlIndexContext);
+  const actions = useActionRuntime();
   const { runCommand } = usePreviewRuntime();
   const host = React.useRef<HTMLDivElement>(null);
   const [menuOpen, setMenuOpen] = React.useState(false);
@@ -307,11 +846,17 @@ function NativeCommandButton({ control, style, normalized, text }: { control: Co
   const iconOnly = normalized && control.kind.startsWith("ToolStrip") && !control.text;
   const glyph = controlButtonGlyph(control);
   const buttonClass = (iconOnly ? "native-icon-button" : "native-command-button") + buttonImageAlignmentClass(control)
-    + (hasMenu ? " native-menu-command" : "") + (controlUsesVisualProfile(control, "opendental", "Button") ? " native-od-button" : "");
+    + (hasMenu ? " native-menu-command" : "") + (controlVisualClass(control, "Button") ? " " + controlVisualClass(control, "Button") : "");
   const button = <Button style={hasMenu ? { width: "100%", height: "100%" } : style} size="small"
     disabled={control.appearance?.enabled === false} className={buttonClass}
     aria-haspopup={hasMenu ? "menu" : undefined} aria-expanded={hasMenu ? menuOpen : undefined}
-    onClick={() => menuItems.length ? setMenuOpen((value) => !value) : runCommand(text || control.name)}
+    onClick={() => {
+      if (menuItems.length) { setMenuOpen((value) => !value); return; }
+      const handler = control.events?.find((event: any) => event.event === "Click")?.handler;
+      if (actions.invoke(control.name, "Click", handler)) return;
+      runCommand((text || control.name) + (handler ? " → " + handler : ""));
+      if (handler) window.dispatchEvent(new CustomEvent("wf-event", { detail: { control: control.name, handler } }));
+    }}
     title={text + (eventTitle(control) ? "\\n" + eventTitle(control) : "")}>
     {(controlIconUrl(control) || glyph) && <ControlIcon control={control} className="native-button-glyph" fallback={glyph} />}
     {!iconOnly && text && <span>{text}</span>}
@@ -364,27 +909,80 @@ function SemanticDateInput({ control }: { control: Control }) {
 }
 
 function SemanticTextInput({ control }: { control: Control }) {
+  const actions = useActionRuntime();
   const multiline = control.appearance?.multiline === true || Number(control.bounds?.height || 0) > 28 || /memo|notes/i.test(control.name);
+  const fallbackValue = String(control.text || "");
   const common = { "aria-label": humanizeType(control.name), maxLength: Number(control.appearance?.maxLength || 0) || undefined,
-    placeholder: control.appearance?.placeholderText, defaultValue: String(control.text || ""),
+    placeholder: control.appearance?.placeholderText,
+    ...(actions.enabled ? { value: String(actions.values[control.name] ?? fallbackValue), onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => actions.setValue(control.name, event.target.value) } : { defaultValue: fallbackValue }),
     readOnly: control.appearance?.readOnly === true, disabled: control.appearance?.enabled === false };
   return multiline ? <textarea className="semantic-text-input multiline" wrap={control.appearance?.wordWrap === false ? "off" : "soft"} {...common} />
     : <input className="semantic-text-input" type={control.appearance?.passwordChar ? "password" : "text"} {...common} />;
 }
 
 function SemanticComboInput({ control }: { control: Control }) {
+  const actions = useActionRuntime();
+  const dynamicOptions = actions.options[control.name];
   const items = [...(control.items || [])] as string[];
   const unassignedLabel = String(control.properties?.HqDescription || "Unassigned");
   if (control.properties?.IncludeUnassigned === true && !items.includes(unassignedLabel)) items.unshift(unassignedLabel);
   const selected = control.appearance?.selectedIndex >= 0 ? items[control.appearance.selectedIndex] : "";
   const ProfileVisual = profileVisualComponent(control);
   if (ProfileVisual) return <ProfileVisual control={control} label={humanizeType(control.name)} items={items} selected={selected} />;
-  return <select className="semantic-combo-input" aria-label={humanizeType(control.name)} disabled={control.appearance?.enabled === false} defaultValue={selected}>
-    <option value=""> </option>{items.map((item) => <option key={item} value={item}>{item}</option>)}</select>;
+  return <select className="semantic-combo-input" aria-label={humanizeType(control.name)} disabled={control.appearance?.enabled === false}
+    {...(actions.enabled ? { value: String(actions.values[control.name] ?? ""), onChange: (event: React.ChangeEvent<HTMLSelectElement>) => actions.setValue(control.name, event.target.value) } : { defaultValue: selected })}>
+    <option value=""> </option>{dynamicOptions
+      ? dynamicOptions.map((item, index) => <option key={String(item.value) + ":" + index} value={String(item.value ?? "")}>{item.label}</option>)
+      : items.map((item) => <option key={item} value={item}>{item}</option>)}</select>;
 }
 
 function SemanticWarningIndicator({ control }: { control: Control }) {
   return <span className="semantic-warning-indicator" role="img" aria-label={humanizeType(control.name)} title="Validation status">!</span>;
+}
+
+function SemanticDataGrid({ control, style }: { control: Control; style?: React.CSSProperties }) {
+  const actions = useActionRuntime();
+  const designerColumns = (control.columns || []) as any[];
+  const title = String(control.properties?.Title || control.text || "");
+  const grid = actions.grids[control.name];
+  const selected = actions.selectedRows[control.name] || [];
+  const rows = grid?.rows || [];
+  const inferredFields = designerColumns.length === 0 && rows.length > 0 && rows[0] && typeof rows[0] === "object" && !Array.isArray(rows[0])
+    ? Object.keys(rows[0]) : [];
+  const columns = designerColumns.length > 0 ? designerColumns : inferredFields.map((name) => ({
+    name, headerText: humanizeType(name), width: Math.max(88, Math.min(220, humanizeType(name).length * 10 + 32)), runtimeInferred: true,
+  }));
+  return <div style={style} className="migration-custom semantic-data-grid" role="grid" aria-label={title || humanizeType(control.name)} aria-rowcount={rows.length}>
+    {title && <div className="semantic-data-grid-title">{title}</div>}
+    {columns.length > 0 && <div className="migration-grid-head" role="row">{columns.map((column, index) => <span role="columnheader" key={column.name || index}
+      style={{ flex: "0 0 " + Math.max(24, Number(column.width || 100)) + "px" }}>{column.headerText || column.name}</span>)}</div>}
+    <div className={"semantic-data-grid-body" + (rows.length ? " has-rows" : " migration-grid-empty")} role="rowgroup" aria-label={rows.length ? "Runtime rows" : "Runtime rows pending"}>
+      {rows.length ? rows.map((row, rowIndex) => {
+        const rowId = grid?.rowIdField ? responseValue(row, grid.rowIdField) : rowIndex;
+        const isSelected = selected.some((value) => Object.is(value, rowId));
+        return <div className={"semantic-data-grid-row" + (isSelected ? " selected" : "")} role="row" aria-selected={isSelected} tabIndex={0}
+          key={String(rowId) + ":" + rowIndex} onClick={() => actions.toggleRow(control.name, rowId)} onKeyDown={(event) => {
+            if (event.key === " " || event.key === "Enter") { event.preventDefault(); actions.toggleRow(control.name, rowId); }
+          }}>{columns.map((column, columnIndex) => {
+            const field = grid?.columnFields?.[column.name] || (column.runtimeInferred ? column.name : undefined);
+            const value = field === "$selected" ? (isSelected ? "X" : "") : field ? responseValue(row, field) : Object.values(row)[columnIndex];
+            return <span role="gridcell" key={column.name || columnIndex} style={{ flex: "0 0 " + Math.max(24, Number(column.width || 100)) + "px" }} title={String(value ?? "")}>{String(value ?? "")}</span>;
+          })}</div>;
+      }) : Array.from({ length: Math.max(2, Math.min(8, Math.floor((Number(control.bounds?.height || 100) - (title ? 42 : 23)) / 19))) }).map((_, index) => <span key={index} />)}
+    </div>
+  </div>;
+}
+
+function SemanticMenuBar({ control }: { control: Control }) {
+  const items = (control.items || []) as string[];
+  const { runCommand } = usePreviewRuntime();
+  return <div className="migration-custom semantic-menu-bar" role="menubar" aria-label={humanizeType(control.name)}>
+    {items.map((item, index) => <button type="button" role="menuitem" key={item + ":" + index} onClick={() => {
+      const handler = control.events?.[index]?.handler;
+      runCommand(item + (handler ? " → " + handler : ""));
+      if (handler) window.dispatchEvent(new CustomEvent("wf-event", { detail: { control: control.name, handler } }));
+    }}>{item}</button>)}
+  </div>;
 }
 
 function DiffPreview({ filePath = previewFileName, revision }: { filePath?: string; revision?: PreviewRevision } = {}) {
@@ -393,39 +991,10 @@ function DiffPreview({ filePath = previewFileName, revision }: { filePath?: stri
   const [contextLines, setContextLines] = React.useState(12);
   const [showEntireFile, setShowEntireFile] = React.useState(false);
   const fileName = filePath.replace(/\\\\/g, "/").split("/").pop() || previewFileName;
-  const body = /Designer/i.test(fileName) ? [
-    { old: "112", next: "112", text: "         RevisionsSplitContainer.Panel2.Controls.Add(RevisionInfo);", kind: "plain" },
-    { old: "113", next: "", text: "-        CommitInfoTabPage.Controls.Add(RevisionInfo);", kind: "removed" },
-    { old: "", next: "113", text: "+        RevisionInfo.Dock = DockStyle.Fill;", kind: "added" },
-    { old: "114", next: "114", text: "         RightSplitContainer.Panel1.Controls.Add(RevisionsSplitContainer);", kind: "plain" },
-  ] : /RevisionGridControl/i.test(fileName) ? [
-    { old: "418", next: "418", text: "     private void SetSelectedRevision(GitRevision revision)", kind: "plain" },
-    { old: "419", next: "", text: "-        SelectedRevision = revision;", kind: "removed" },
-    { old: "", next: "419", text: "+        SetSelectedRevision(revision, ensureVisible: true);", kind: "added" },
-    { old: "420", next: "420", text: "     OnSelectionChanged(EventArgs.Empty);", kind: "plain" },
-  ] : [
-    { old: "114", next: "114", text: "     private void RefreshRevisions()", kind: "plain" },
-    { old: "115", next: "", text: "-        RevisionGrid.RefreshRevisions();", kind: "removed" },
-    { old: "", next: "115", text: "+        RevisionGrid.RefreshRevisions(keepSelection: true);", kind: "added" },
-    { old: "116", next: "116", text: "     UpdateCommitDetails();", kind: "plain" },
-  ];
-  const context = [
-    { old: "117", next: "117", text: "     RefreshGitStatusMonitor();", kind: "plain" },
-    { old: "118", next: "118", text: "     RevisionGrid.Focus();", kind: "plain" },
-    { old: "119", next: "119", text: " }", kind: "plain" },
-    { old: "120", next: "120", text: "", kind: "plain" },
-    { old: "121", next: "121", text: " private void UpdateCommitDetails()", kind: "plain" },
-    { old: "122", next: "122", text: " {", kind: "plain" },
-    { old: "123", next: "123", text: "     if (RevisionGrid.SelectedRevision is null)", kind: "plain" },
-    { old: "124", next: "124", text: "     {", kind: "plain" },
-    { old: "125", next: "125", text: "         RevisionInfo.Clear();", kind: "plain" },
-    { old: "126", next: "126", text: "         return;", kind: "plain" },
-    { old: "127", next: "127", text: "     }", kind: "plain" },
-    { old: "128", next: "128", text: "", kind: "plain" },
-    { old: "129", next: "129", text: "     RevisionInfo.SetRevision(RevisionGrid.SelectedRevision);", kind: "plain" },
-    { old: "130", next: "130", text: "     revisionDiff.SetRevision(RevisionGrid.SelectedRevision);", kind: "plain" },
-    { old: "131", next: "131", text: " }", kind: "plain" },
-  ];
+  const diffFixture = workspacePreviewFixture.diff;
+  const variant = (diffFixture.variants || []).find((item: any) => new RegExp(item.pattern, "i").test(fileName));
+  const body = variant?.body || diffFixture.defaultBody || [];
+  const context = diffFixture.context || [];
   const visibleContext = context.slice(0, showEntireFile ? context.length : contextLines);
   const contextSplit = Math.min(7, visibleContext.length);
   const lines = [
@@ -460,12 +1029,8 @@ function renderDiffText(text: string, showWhitespace: boolean): React.ReactNode 
 }
 
 function RevisionDiffPreview() {
-  const files = [
-    { status: "M", imageKey: "FileStatusModified", path: "GitUI/CommandsDialogs/FormBrowse.cs" },
-    { status: "M", imageKey: "FileStatusModified", path: "GitUI/CommandsDialogs/FormBrowse.Designer.cs" },
-    { status: "A", imageKey: "FileStatusAdded", path: "GitUI/UserControls/RevisionGridControl.cs" },
-  ];
-  const [selected, setSelected] = React.useState(files[0].path);
+  const files: Array<{ status: string; imageKey: string; path: string }> = workspacePreviewFixture.diff.files || [];
+  const [selected, setSelected] = React.useState(files[0]?.path || previewFileName);
   const [query, setQuery] = React.useState("");
   const [filePaneRatio, setFilePaneRatio] = React.useState(.365);
   const splitHost = React.useRef<HTMLDivElement>(null);
@@ -500,17 +1065,10 @@ function NativeMenuBar({ controls }: { controls: Control[] }) {
     return item ? { ...item, text, children: item.children?.length ? item.children : children.map((label, index) => ({ name: name + "Virtual" + index, kind: "ToolStripMenuItem", text: label, children: [] })) }
       : { name, kind: "ToolStripMenuItem", text, children: children.map((label, index) => ({ name: name + "Virtual" + index, kind: "ToolStripMenuItem", text: label, children: [] })) };
   };
-  const items = byName.has("repositoryToolStripMenuItem") ? [
-    menu("fileToolStripMenuItem", "Start", ["Open repository…", "Clone repository…", "Exit"]),
-    menu("repositoryToolStripMenuItem", "Repository"),
-    menu("navigateRuntimeMenu", "Navigate", ["Back", "Forward", "Go to commit…"]),
-    menu("viewRuntimeMenu", "View", ["Show left panel", "Show split view", "Refresh"]),
-    menu("commandsToolStripMenuItem", "Commands"),
-    menu("_repositoryHostsToolStripMenuItem", "GitHub"),
-    menu("pluginsToolStripMenuItem", "Plugins"),
-    menu("toolsToolStripMenuItem", "Tools", ["Settings", "Manage hotkeys"]),
-    menu("helpToolStripMenuItem", "Help", ["About Git Extensions", "Documentation"]),
-  ] : sourceItems.slice(0, 9);
+  const menuFixture = workspacePreviewFixture.menu;
+  const items: Control[] = byName.has(menuFixture.triggerControlName)
+    ? menuFixture.items.map((item: any) => menu(item.name, item.text, item.children))
+    : sourceItems.slice(0, 9);
   const [open, setOpen] = React.useState<string | null>(null);
   const menuRef = React.useRef<HTMLDivElement>(null);
   const active = items.find((item) => item.name === open);
@@ -533,12 +1091,12 @@ function NativeMenuBar({ controls }: { controls: Control[] }) {
     else if (event.key === "Escape") { event.preventDefault(); const index = items.findIndex((item) => item.name === open); setOpen(null); (menuRef.current?.querySelectorAll(":scope > button")[index] as HTMLButtonElement | undefined)?.focus(); }
   };
   const activateChild = (child: Control) => {
-    if (active?.name === "viewRuntimeMenu" && /Virtual0$/.test(child.name)) { setLeftPanelVisible((value) => !value); runCommand("Toggle left panel"); }
-    else if (active?.name === "viewRuntimeMenu" && /Virtual1$/.test(child.name)) { setSplitViewVertical((value) => !value); runCommand("Toggle split view layout"); }
+    if (active?.name === menuFixture.viewMenuName && /Virtual0$/.test(child.name)) { setLeftPanelVisible((value) => !value); runCommand("Toggle left panel"); }
+    else if (active?.name === menuFixture.viewMenuName && /Virtual1$/.test(child.name)) { setSplitViewVertical((value) => !value); runCommand("Toggle split view layout"); }
     else runCommand(displayText(child));
     setOpen(null);
   };
-  const childChecked = (child: Control) => active?.name === "viewRuntimeMenu" && (/Virtual0$/.test(child.name) ? leftPanelVisible : /Virtual1$/.test(child.name) ? splitViewVertical : false);
+  const childChecked = (child: Control) => active?.name === menuFixture.viewMenuName && (/Virtual0$/.test(child.name) ? leftPanelVisible : /Virtual1$/.test(child.name) ? splitViewVertical : false);
   return <div ref={menuRef} className="native-menu-bar" onMouseLeave={() => setOpen(null)}>
     {items.map((item, itemIndex) => { const label = displayText(item); const key = label[0]?.toLocaleLowerCase(); return <button type="button" accessKey={key} aria-keyshortcuts={key ? "Alt+" + key.toLocaleUpperCase() : undefined} className={open === item.name ? "active" : ""} key={item.name}
       onClick={() => setOpen((value) => value === item.name ? null : item.name)} onKeyDown={(event) => menuKey(event, itemIndex)}>{label}</button>; })}
@@ -557,7 +1115,9 @@ function NativeToolStrip({ control }: { control: Control }) {
   const [toolbarRowWidth, setToolbarRowWidth] = React.useState(1406);
   const [open, setOpen] = React.useState<string | null>(null);
   const active = items.find((item: Control) => item.name === open);
-  const mainStrip = /ToolStripMain/i.test(control.name);
+  const toolbarFixture = workspacePreviewFixture.toolbar;
+  const fixtureNameMatches = (name: string, candidates: string[]) => candidates.some((candidate) => name.toLocaleLowerCase().endsWith(candidate.toLocaleLowerCase()));
+  const mainStrip = fixtureNameMatches(control.name, toolbarFixture.mainStripNames || []);
   React.useEffect(() => {
     const row = hostRef.current?.closest(".layout-role-toolbar") || hostRef.current?.parentElement;
     if (!row || typeof ResizeObserver === "undefined") return;
@@ -573,24 +1133,25 @@ function NativeToolStrip({ control }: { control: Control }) {
   const stripWidth = Number(control.bounds?.width || 0) || undefined;
   const renderedStripWidth = mainStrip ? Math.max(toolbarRowWidth >= 1300 ? 720 : 680, stripWidth || 0) : stripWidth;
   const toolbarItemText = (item: Control) => {
-    if (/_NO_TRANSLATE_WorkingDir$/i.test(item.name)) return previewRepository.path;
-    if (/branchSelect$/i.test(item.name)) return previewRepository.branch;
-    if (/toolStripButtonCommit$/i.test(item.name)) return "Commit (" + previewRepository.dirtyCount + ")";
+    if (fixtureNameMatches(item.name, toolbarFixture.repositoryPathControlNames || [])) return previewRepository.path;
+    if (fixtureNameMatches(item.name, toolbarFixture.repositoryBranchControlNames || [])) return previewRepository.branch;
+    if (fixtureNameMatches(item.name, toolbarFixture.dirtyCountControlNames || [])) return "Commit (" + previewRepository.dirtyCount + ")";
+    if (toolbarFixture.textValues?.[item.name]) return toolbarFixture.textValues[item.name];
     return displayText(item);
   };
   const toolbarItemTitle = (item: Control) => String(item.properties?.ToolTipText || toolbarItemText(item));
-  const toolbarVisualControl = (item: Control) => /_NO_TRANSLATE_WorkingDir$/i.test(item.name)
-    ? { ...item, appearance: { ...item.appearance, imageKey: "DashboardFolderGit" } }
+  const toolbarVisualControl = (item: Control) => toolbarFixture.imageKeys?.[item.name]
+    ? { ...item, appearance: { ...item.appearance, imageKey: toolbarFixture.imageKeys[item.name] } }
     : item;
   const activateItem = (item: Control) => {
-    if (/^toggleLeftPanel$/i.test(item.name)) { setLeftPanelVisible((value) => !value); runCommand("Toggle left panel"); return; }
-    if (/^toggleSplitViewLayout$/i.test(item.name)) { setSplitViewVertical((value) => !value); runCommand("Toggle split view layout"); return; }
+    if (toolbarFixture.actions?.[item.name] === "toggle-left-panel") { setLeftPanelVisible((value) => !value); runCommand("Toggle left panel"); return; }
+    if (toolbarFixture.actions?.[item.name] === "toggle-split-view") { setSplitViewVertical((value) => !value); runCommand("Toggle split view layout"); return; }
     if (item.children?.length) setOpen((value) => value === item.name ? null : item.name);
     else runCommand(toolbarItemText(item));
   };
-  if (items.length === 0 && /ToolStripScripts/i.test(control.name)) return <div className="native-tool-strip runtime-script-strip" style={{ width: "auto", minWidth: 118 }}>
-    <button type="button" title="Open repository in Visual Studio Code" onClick={() => runCommand("Open in VS Code")}>
-      <ControlIcon control={{ appearance: { imageKey: "Develop" } }} className="toolbar-glyph" fallback="&lt;/&gt;" /><span>Open in VS Code</span>
+  if (items.length === 0 && fixtureNameMatches(control.name, toolbarFixture.scriptStripNames || [])) return <div className="native-tool-strip runtime-script-strip" style={{ width: "auto", minWidth: 118 }}>
+    <button type="button" title={toolbarFixture.scriptCommand.title} onClick={() => runCommand(toolbarFixture.scriptCommand.label)}>
+      <ControlIcon control={{ appearance: { imageKey: toolbarFixture.scriptCommand.imageKey } }} className="toolbar-glyph" fallback="&lt;/&gt;" /><span>{toolbarFixture.scriptCommand.label}</span>
     </button>
   </div>;
   if (items.length === 0) return <div className="native-tool-strip" style={{ width: stripWidth }}><button type="button"><span className="toolbar-glyph">⚙</span>{control.text || humanizeType(control.name)}</button></div>;
@@ -599,7 +1160,7 @@ function NativeToolStrip({ control }: { control: Control }) {
       ? <span className="native-toolbar-separator" key={item.name} />
       : <button type="button" key={item.name} title={toolbarItemTitle(item)} className={open === item.name ? "active" : ""} style={{ minWidth: Number(item.bounds?.width || 0) || undefined }}
           onClick={() => activateItem(item)}>
-          <ControlIcon control={toolbarVisualControl(item)} className="toolbar-glyph" fallback={buttonGlyph(item.name) || "·"} />{toolbarShowsText(item) && <span>{toolbarItemText(item)}</span>}{item.kind.includes("Split") && <small>▾</small>}
+          <ControlIcon control={toolbarVisualControl(item)} className="toolbar-glyph" fallback={profileControlGlyph(item) || "·"} />{profileToolbarShowsText(item) && <span>{toolbarItemText(item)}</span>}{item.kind.includes("Split") && <small>▾</small>}
         </button>)}
     {overflowItems.length > 0 && <button type="button" className={open === "__overflow" ? "active native-overflow-button" : "native-overflow-button"} title="More commands" onClick={() => setOpen((value) => value === "__overflow" ? null : "__overflow")}>»</button>}
     {dropdownItems.length > 0 && <div className="native-toolbar-dropdown" style={{ left: open === "__overflow" && renderedStripWidth ? Math.max(2, renderedStripWidth - 225) : Math.min(440, Math.max(2, items.findIndex((item: Control) => item.name === open) * 31)) }}>
@@ -612,42 +1173,15 @@ function NativeToolStrip({ control }: { control: Control }) {
 
 function RepositoryTreePreview() {
   type RepoNode = { id: string; parent: string | null; imageKey: string; label: string; level: number; strong: boolean; muted?: boolean };
-  const nodes: RepoNode[] = [
-    { id: "submodules", parent: null, imageKey: "FolderSubmodule", label: "Submodules", level: 0, strong: true },
-    { id: "repo", parent: "submodules", imageKey: "FolderSubmodule", label: "gitextensions_5 (tmp/reword1)", level: 1, strong: true },
-    { id: "externals", parent: "repo", imageKey: "FolderOpen", label: "Externals", level: 2, strong: false },
-    { id: "conemu", parent: "externals", imageKey: "FolderClosed", label: "conemu-inside", level: 3, strong: false },
-    { id: "easyhook", parent: "externals", imageKey: "FolderClosed", label: "EasyHook", level: 3, strong: false },
-    { id: "github", parent: "externals", imageKey: "FolderClosed", label: "Git.hub", level: 3, strong: false },
-    { id: "texteditor", parent: "externals", imageKey: "FolderClosed", label: "ICSharpCode.TextEditor", level: 3, strong: false },
-    { id: "branches", parent: null, imageKey: "FolderOpen", label: "Branches", level: 0, strong: true },
-    { id: "tmp", parent: "branches", imageKey: "FolderOpen", label: "tmp", level: 1, strong: false },
-    { id: "reword1", parent: "tmp", imageKey: "BranchLocal", label: "reword1", level: 2, strong: true },
-    { id: "master", parent: "branches", imageKey: "BranchLocal", label: "master (0↑)", level: 1, strong: false },
-    { id: "bugfix", parent: "branches", imageKey: "BranchLocal", label: "bugfix", level: 1, strong: false },
-    { id: "feature", parent: "branches", imageKey: "BranchLocal", label: "feature", level: 1, strong: false },
-    { id: "lazy", parent: "branches", imageKey: "BranchLocal", label: "lazyLoadIgnoredFiles_go (0↑)", level: 1, strong: false },
-    { id: "remotes", parent: null, imageKey: "Remotes", label: "Remotes", level: 0, strong: true },
-    { id: "origin", parent: "remotes", imageKey: "Remote", label: "origin", level: 1, strong: false },
-    { id: "origin-master", parent: "origin", imageKey: "BranchRemote", label: "master", level: 2, strong: false },
-    { id: "upstream", parent: "remotes", imageKey: "Remote", label: "upstream", level: 1, strong: false },
-    { id: "upstream-master", parent: "upstream", imageKey: "BranchRemote", label: "master", level: 2, strong: false },
-    { id: "inactive-remotes", parent: "remotes", imageKey: "Remote", label: "[Inactive]", level: 1, strong: false, muted: true },
-    { id: "tags", parent: null, imageKey: "Tag", label: "Tags", level: 0, strong: true },
-    { id: "v421", parent: "tags", imageKey: "Tag", label: "v4.2.1", level: 1, strong: false },
-  ];
-  const [selected, setSelected] = React.useState("reword1");
+  type RepoView = { title: string; imageKey: string; rootId: string | null };
+  const treeFixture = workspacePreviewFixture.repositoryTree;
+  const nodes: RepoNode[] = treeFixture.nodes || [];
+  const [selected, setSelected] = React.useState(treeFixture.selectedId || nodes[0]?.id || "");
   const [query, setQuery] = React.useState("");
-  const [collapsed, setCollapsed] = React.useState<Set<string>>(() => new Set(["origin", "upstream", "tags"]));
+  const [collapsed, setCollapsed] = React.useState<Set<string>>(() => new Set(treeFixture.collapsedIds || []));
   const treeRef = React.useRef<HTMLDivElement>(null);
-  const views = [
-    { title: "Repository tree", imageKey: "LayoutSidebarLeft", rootId: null },
-    { title: "Branches", imageKey: "LayoutSidebarTopLeft", rootId: "branches" },
-    { title: "Remotes", imageKey: "LayoutSidebarTopRight", rootId: "remotes" },
-    { title: "Submodules", imageKey: "FolderSubmodule", rootId: "submodules" },
-    { title: "Tags", imageKey: "Tag", rootId: "tags" },
-  ];
-  const [view, setView] = React.useState(views[0].title);
+  const views: RepoView[] = treeFixture.views || [];
+  const [view, setView] = React.useState(views[0]?.title || "");
   const nodeById = new Map(nodes.map((item) => [item.id, item]));
   const childrenOf = (id: string) => nodes.filter((item) => item.parent === id);
   const ancestorIds = (item: RepoNode) => { const result: string[] = []; let parent = item.parent; while (parent) { result.push(parent); parent = nodeById.get(parent)?.parent || null; } return result; };
@@ -691,13 +1225,7 @@ function RevisionGridPreview() {
   const gridRef = React.useRef<HTMLDivElement>(null);
   const selectionAnchor = React.useRef(3);
   const [menu, setMenu] = React.useState<{ x: number; y: number } | null>(null);
-  const commands = [
-    { label: "Checkout revision…", imageKey: "Checkout", shortcut: "" },
-    { label: "Create new branch…", imageKey: "BranchCreate", shortcut: "" },
-    { label: "Cherry pick commit", imageKey: "CherryPick", shortcut: "" },
-    { label: "Compare revisions", imageKey: "Diff", shortcut: "Ctrl+D" },
-    { label: "Copy commit hash", imageKey: "CommitId", shortcut: "Ctrl+C" },
-  ];
+  const commands: Array<{ label: string; imageKey: string; shortcut: string }> = workspacePreviewFixture.revisionCommands || [];
   const openMenu = (event: React.MouseEvent<HTMLButtonElement>, row: PreviewRevision) => {
     event.preventDefault();
     setRevision(row);
@@ -711,7 +1239,8 @@ function RevisionGridPreview() {
   const textFilter = revisionFilter.trim().toLocaleLowerCase();
   const refFilter = branchFilter.trim().toLocaleLowerCase();
   const visibleRevisions = previewRevisions.filter((row) => {
-    const inScope = revisionScope === "All branches" || row.artificial || row.graph === "main" || row.refs.some((ref) => /master|reword1/i.test(ref));
+    const inScope = revisionScope === "All branches" || row.artificial || row.graph === "main"
+      || row.refs.some((ref) => (workspacePreviewFixture.primaryRevisionRefs || []).some((item: string) => ref.toLocaleLowerCase().includes(item.toLocaleLowerCase())));
     const matchesRef = !refFilter || row.refs.some((ref) => ref.toLocaleLowerCase().includes(refFilter));
     const searchable = [...row.refs, row.subject, row.author, row.hash, row.date].join(" ").toLocaleLowerCase();
     return inScope && (!firstParent || row.graph !== "side") && matchesRef && (!textFilter || searchable.includes(textFilter));
@@ -809,16 +1338,9 @@ function CommitInfoPreview() {
 
 function FileTreePreview() {
   type FileNode = { id: string; parent: string | null; name: string; path: string; folder: boolean; level: number };
-  const files: FileNode[] = [
-    { id: "src", parent: null, name: "src", path: "src", folder: true, level: 0 },
-    { id: "commands", parent: "src", name: "CommandsDialogs", path: "src/CommandsDialogs", folder: true, level: 1 },
-    { id: "browse", parent: "commands", name: "FormBrowse.cs", path: "GitUI/CommandsDialogs/FormBrowse.cs", folder: false, level: 2 },
-    { id: "designer", parent: "commands", name: "FormBrowse.Designer.cs", path: "GitUI/CommandsDialogs/FormBrowse.Designer.cs", folder: false, level: 2 },
-    { id: "grid", parent: "src", name: "RevisionGrid", path: "src/RevisionGrid", folder: true, level: 1 },
-    { id: "grid-control", parent: "grid", name: "RevisionGridControl.cs", path: "GitUI/UserControls/RevisionGridControl.cs", folder: false, level: 2 },
-    { id: "readme", parent: null, name: "README.md", path: "README.md", folder: false, level: 0 },
-  ];
-  const [selected, setSelected] = React.useState("browse");
+  const fileTreeFixture = workspacePreviewFixture.fileTree;
+  const files: FileNode[] = fileTreeFixture.files || [];
+  const [selected, setSelected] = React.useState(fileTreeFixture.selectedId || files[0]?.id || "");
   const [collapsed, setCollapsed] = React.useState<Set<string>>(() => new Set());
   const [query, setQuery] = React.useState("");
   const [mode, setMode] = React.useState<"View" | "Blame">("View");
@@ -829,13 +1351,9 @@ function FileTreePreview() {
   const queryPath = new Set<string>();
   if (normalizedQuery) files.filter((item) => item.path.toLocaleLowerCase().includes(normalizedQuery)).forEach((item) => { queryPath.add(item.id); ancestors(item).forEach((id) => queryPath.add(id)); });
   const visibleFiles = files.filter((item) => normalizedQuery ? queryPath.has(item.id) : !ancestors(item).some((id) => collapsed.has(id)));
-  const current = nodeById.get(selected) || files[2];
-  const sourceByFile: Record<string, string[]> = {
-    browse: ["using GitCommands;", "using GitUI.CommandsDialogs;", "", "public sealed partial class FormBrowse", "{", "    private void RefreshRevisions()", "    {", "        RevisionGrid.RefreshRevisions();", "    }", "}"],
-    designer: ["partial class FormBrowse", "{", "    private SplitContainer MainSplitContainer;", "    private RevisionGridControl RevisionGrid;", "    private CommitInfo CommitInfo;", "", "    private void InitializeComponent()", "    {", "        RevisionGrid.Dock = DockStyle.Fill;", "    }", "}"],
-    "grid-control": ["public sealed class RevisionGridControl : GitModuleControl", "{", "    public GitRevision? SelectedRevision { get; private set; }", "", "    public void RefreshRevisions(bool keepSelection)", "    {", "        // reload revision graph", "    }", "}"],
-    readme: ["# Git Extensions", "", "Git Extensions is a graphical user interface for Git.", "", "This preview was reconstructed from WinForms metadata."],
-  };
+  const current = nodeById.get(selected) || files[0];
+  const sourceByFile: Record<string, string[]> = fileTreeFixture.sources || {};
+  if (!current) return <div className="native-file-tree-preview"><div className="file-tree-empty">No preview files</div></div>;
   const sourceLines = sourceByFile[current.id] || ["Folder: " + current.path, "", "Select a file to view its contents."];
   const toggleFolder = (id: string) => setCollapsed((value) => { const next = new Set(value); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   return <div className="native-file-tree-preview">
@@ -848,7 +1366,7 @@ function FileTreePreview() {
   </div>;
 }
 
-function GpgInfoPreview() {
+function SignatureInfoPreview() {
   const { revision, runCommand } = usePreviewRuntime();
   const verified = !revision.artificial;
   return <div className="native-gpg-info"><div className={"gpg-status " + (verified ? "verified" : "unsigned")}><ControlIcon control={{ appearance: { imageKey: verified ? "CommitSignatureOk" : "CommitSignatureWarning" } }} className="gpg-status-icon" fallback={verified ? "✓" : "!"} /><div><strong>{verified ? "Good signature" : "No signature"}</strong><span>{verified ? "This commit was signed and the signature was verified." : "Working tree and index revisions are not signed."}</span></div></div>
@@ -857,9 +1375,9 @@ function GpgInfoPreview() {
   </div>;
 }
 
-function GitActionPreview({ control }: { control: Control }) {
-  const bisect = /bisect/i.test(control.name);
-  return <div className="native-action-notice"><span className="native-spinner">◌</span><strong>{bisect ? "Bisect in progress" : "Git command in progress"}</strong><span>{bisect ? "Select good or bad revision to continue." : "The repository is being refreshed…"}</span><button type="button">Cancel</button></div>;
+function ActionProgressPreview({ control }: { control: Control }) {
+  const mode = (workspacePreviewFixture.actionModes || []).find((item: any) => new RegExp(item.pattern, "i").test(control.name));
+  return <div className="native-action-notice"><span className="native-spinner">◌</span><strong>{mode?.title || "Command in progress"}</strong><span>{mode?.detail || "The operation is being refreshed…"}</span><button type="button">Cancel</button></div>;
 }
 
 function FilterToolbarPreview() {
@@ -896,13 +1414,11 @@ function FilterToolbarPreview() {
 function ConsolePreview() {
   const { revision } = usePreviewRuntime();
   const prompt = previewRepository.path + ">";
+  const consoleFixture = workspacePreviewFixture.console;
   const [command, setCommand] = React.useState("");
   const [lines, setLines] = React.useState([
-    "Microsoft Windows [Version 10.0.22631.4037]",
-    "Git Extensions repository console",
-    prompt + " git status --short",
-    " M GitUI/CommandsDialogs/FormBrowse.cs",
-    " M GitUI/CommandsDialogs/FormBrowse.Designer.cs",
+    ...(consoleFixture.banner || []),
+    ...(consoleFixture.initialCommands || []).map((line: string, index: number) => index === 0 ? prompt + " " + line : line),
   ]);
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -910,11 +1426,11 @@ function ConsolePreview() {
     if (!value) return;
     if (/^(?:cls|clear)$/i.test(value)) setLines([]);
     else if (/^git\\s+log/i.test(value)) setLines((current) => [...current, prompt + " " + value, (revision.hash || "working") + " " + (revision.subject || "Working directory")]);
-    else if (/^git\\s+status/i.test(value)) setLines((current) => [...current, prompt + " " + value, "On branch " + previewRepository.branch, "Changes not staged for commit:", "  modified: GitUI/CommandsDialogs/FormBrowse.cs"]);
+    else if (/^git\\s+status/i.test(value)) setLines((current) => [...current, prompt + " " + value, "On branch " + previewRepository.branch, ...(consoleFixture.statusLines || [])]);
     else setLines((current) => [...current, prompt + " " + value, "Preview command captured; shell backend is not connected."]);
     setCommand("");
   };
-  return <div className="native-console"><div className="console-toolbar"><span>Console · gitextensions_5</span><button type="button" onClick={() => setLines([])}>Clear</button></div><div className="console-output">
+  return <div className="native-console"><div className="console-toolbar"><span>{consoleFixture.title || "Console"}</span><button type="button" onClick={() => setLines([])}>Clear</button></div><div className="console-output">
     {lines.map((line, index) => <div key={index}>{line || " "}</div>)}
     <form onSubmit={submit}><span>{prompt}</span><input aria-label="Repository console command" autoFocus value={command} onChange={(event) => setCommand(event.target.value)} spellCheck={false} /></form>
   </div></div>;
@@ -922,13 +1438,12 @@ function ConsolePreview() {
 
 function NativeWindowFrame({ page, children }: { page: any; children: React.ReactNode }) {
   const { runCommand } = usePreviewRuntime();
-  const gitPreview = pageUsesVisualProfile(page, "gitextensions-workspace");
-  const openDentalPreview = pageUsesVisualProfile(page, "opendental");
-  const title = gitPreview
-    ? previewRepository.name + " (" + previewRepository.branch + ") - " + (page.text || "Git Extensions") + " " + previewRepository.version
+  const visualProfile = pageVisualProfile(page);
+  const title = visualProfile.titleFromWorkspace
+    ? previewRepository.name + " (" + previewRepository.branch + ") - " + (page.text || workspacePreviewFixture.applicationTitleFallback) + " " + previewRepository.version
     : String(page.text || page.name || "WinForms application");
   React.useEffect(() => {
-    if (!gitPreview) return;
+    if (!visualProfile.keyboardShortcuts) return;
     const shortcut = (event: KeyboardEvent) => {
       if (event.key === "F5") { event.preventDefault(); runCommand("Refresh revisions (F5)"); }
       if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "l") {
@@ -938,14 +1453,14 @@ function NativeWindowFrame({ page, children }: { page: any; children: React.Reac
     };
     window.addEventListener("keydown", shortcut);
     return () => window.removeEventListener("keydown", shortcut);
-  }, [gitPreview, runCommand]);
+  }, [visualProfile.keyboardShortcuts, runCommand]);
   const showMinimize = page.minimizeBox !== false;
   const showMaximize = page.maximizeBox !== false;
   const showClose = page.controlBox !== false;
   const pageIcon = visualAssets[String(page.properties?.migrationIconAssetKey || "")];
   return <>
-    <div className={"native-window-titlebar" + (openDentalPreview ? " native-od-titlebar" : "")}>
-      {gitPreview ? <ControlIcon control={{ appearance: { imageKey: "GitLogo16" } }} className="native-app-icon" fallback="↗" />
+    <div className={"native-window-titlebar" + (visualProfile.titlebarClass ? " " + visualProfile.titlebarClass : "")}>
+      {visualProfile.appIconImageKey ? <ControlIcon control={{ appearance: { imageKey: visualProfile.appIconImageKey } }} className="native-app-icon" fallback={visualProfile.appIconFallback} />
         : pageIcon ? <span className="native-app-icon"><img src={pageIcon} alt="" /></span>
         : <span className="native-app-icon native-generic-app-icon" aria-hidden="true" />}
       <strong>{title}</strong>
@@ -955,36 +1470,99 @@ function NativeWindowFrame({ page, children }: { page: any; children: React.Reac
   </>;
 }
 
+function initialVisibilityVariants(groups: any[]): number[] {
+  const requested = typeof window === "undefined" ? [] : String(new URLSearchParams(window.location.search).get("wfVariant") || "").split("-").map(Number);
+  return groups.map((group: any, index: number) => Number.isInteger(requested[index]) && requested[index] >= 0 && requested[index] < (group.variants || []).length
+    ? requested[index] : Number(group.defaultVariant || 0));
+}
+
 export function MigrationSurface({ page, registry }: { page: any; registry: Record<string, React.ComponentType<DefinitionAdapterProps>> }) {
-  const index = indexControls(page.controls);
-  const defaultHiddenControls = new Set<Control>();
+  const surface = React.useRef<HTMLElement>(null);
+  const index = React.useMemo(() => indexControls(page.controls), [page.controls]);
+  const visibilityGroups = page.runtimeVisibilityGroups || [];
+  const [visibilityVariants, setVisibilityVariants] = React.useState<number[]>(() => initialVisibilityVariants(visibilityGroups));
+  React.useEffect(() => setVisibilityVariants(initialVisibilityVariants(visibilityGroups)), [page]);
+  const runtimeHiddenControls = new Set<Control>();
   const runtimeTabNavigators = new Map<Control, Control>();
-  for (const group of page.runtimeVisibilityGroups || []) {
-    const variant = group.variants?.[Number(group.defaultVariant || 0)];
+  visibilityGroups.forEach((group: any, groupIndex: number) => {
+    const variant = group.variants?.[visibilityVariants[groupIndex] ?? Number(group.defaultVariant || 0)];
     for (const name of variant?.hiddenControls || []) {
       const control = index.get(name);
-      if (control) defaultHiddenControls.add(control);
+      if (control) runtimeHiddenControls.add(control);
     }
-  }
+  });
   for (const binding of page.runtimeTabNavigators || []) {
     const navigator = index.get(binding.navigatorControlName);
     const sourceTabs = index.get(binding.tabControlName);
     if (!navigator || !sourceTabs) continue;
     runtimeTabNavigators.set(navigator, sourceTabs);
-    defaultHiddenControls.add(sourceTabs);
+    runtimeHiddenControls.add(sourceTabs);
   }
   const sourceWidth = Number(page.layout?.sourceSize?.width || 1180);
   const sourceHeight = Number(page.layout?.sourceSize?.height || 620);
   const fixedClientStyle = pageClientStyle(page);
-  const gitPreview = pageUsesVisualProfile(page, "gitextensions-workspace");
-  const openDentalPreview = pageUsesVisualProfile(page, "opendental");
-  const canvasStyle = gitPreview
+  const visualProfile = pageVisualProfile(page);
+  const canvasStyle = visualProfile.canvasMode === "workspace"
     ? { width: "100%", minWidth: Math.min(1406, Math.max(1180, sourceWidth)), height: "clamp(620px, calc(100vh - 2px), 725px)" }
-    : openDentalPreview
+    : visualProfile.canvasMode === "fixed-padded"
       ? { width: sourceWidth + 10, minWidth: sourceWidth + 10, height: sourceHeight + 31 }
       : { width: sourceWidth + 2, minWidth: sourceWidth + 2, height: sourceHeight + 33 };
-  const presentationClass = gitPreview ? "native-workspace-form" : openDentalPreview ? "native-fixed-form native-od-form" : "native-fixed-form";
-  return <section className={"migration-page native-presentation " + presentationClass}>
+  const presentationClass = visualProfile.presentationClass;
+  const showStateInspector = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("wfInspect") === "1";
+  const geometryAudit = useSourceGeometryAudit(surface, showStateInspector && visualProfile.layoutMode !== "semantic", page.name + ":" + visibilityVariants.join("|"));
+  const geometryStatus = geometryAudit.checked === 0 ? "…" : geometryAudit.issues.length > 0 ? "⚠ " + geometryAudit.issues.length : "✓ " + geometryAudit.checked;
+  const acceptanceVariantKey = visibilityGroups.length > 0
+    ? visibilityGroups.map((group: any, index: number) => String(visibilityVariants[index] ?? Number(group.defaultVariant || 0))).join("-")
+    : "default";
+  const acceptanceVariantLabels = visibilityGroups.map((group: any, index: number) => {
+    const selected = visibilityVariants[index] ?? Number(group.defaultVariant || 0);
+    return String(group.variants?.[selected]?.label || "variant " + (selected + 1));
+  });
+  const [acceptanceDecision, setAcceptanceDecision] = React.useState<MigrationAcceptanceDecision | "">("");
+  const [acceptanceNotes, setAcceptanceNotes] = React.useState("");
+  const [acceptanceRecordedAt, setAcceptanceRecordedAt] = React.useState("");
+  React.useEffect(() => {
+    const record = readMigrationAcceptanceRecords().find((item) => item.pageName === page.name && item.variantKey === acceptanceVariantKey);
+    setAcceptanceDecision(record?.decision || "");
+    setAcceptanceNotes(record?.notes || "");
+    setAcceptanceRecordedAt(record?.recordedAt || "");
+  }, [page.name, acceptanceVariantKey]);
+  const acceptanceCanSave = geometryAudit.checked > 0 && Boolean(acceptanceDecision)
+    && (acceptanceDecision !== "pass" || geometryAudit.issues.length === 0)
+    && (acceptanceDecision === "pass" || Boolean(acceptanceNotes.trim()));
+  const saveAcceptance = (): boolean => {
+    if (!acceptanceCanSave || !acceptanceDecision) return false;
+    const byType: Record<string, number> = {};
+    for (const issue of geometryAudit.issues) byType[issue.type] = (byType[issue.type] || 0) + 1;
+    const recordedAt = new Date().toISOString();
+    saveMigrationAcceptanceRecord({
+      schemaVersion: 1, pageName: page.name, pageTitle: page.text || page.name,
+      variantKey: acceptanceVariantKey, variantLabels: acceptanceVariantLabels,
+      decision: acceptanceDecision, notes: acceptanceNotes.trim(), recordedAt,
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      geometry: { checked: geometryAudit.checked, issues: geometryAudit.issues, byType },
+    });
+    setAcceptanceRecordedAt(recordedAt);
+    return true;
+  };
+  const nextAcceptanceVariants = (() => {
+    if (visibilityGroups.length === 0) return undefined;
+    const next = visibilityGroups.map((group: any, index: number) => visibilityVariants[index] ?? Number(group.defaultVariant || 0));
+    for (let index = visibilityGroups.length - 1; index >= 0; index -= 1) {
+      if (next[index] + 1 < (visibilityGroups[index].variants || []).length) {
+        next[index] += 1;
+        for (let reset = index + 1; reset < next.length; reset += 1) next[reset] = 0;
+        return next;
+      }
+    }
+    return undefined;
+  })();
+  const saveAndAdvanceAcceptance = () => {
+    if (saveAcceptance() && nextAcceptanceVariants) setVisibilityVariants(nextAcceptanceVariants);
+  };
+  const selectVisibilityVariant = (groupIndex: number, variantIndex: number) => setVisibilityVariants((current) =>
+    visibilityGroups.map((group: any, index: number) => index === groupIndex ? variantIndex : current[index] ?? Number(group.defaultVariant || 0)));
+  return <section ref={surface} className={"migration-page native-presentation " + presentationClass}>
     <header className="migration-page-header">
       <div><h2>{page.text || page.name}</h2><small>{page.sourcePath}</small></div>
       <div className="migration-badges">
@@ -995,11 +1573,45 @@ export function MigrationSurface({ page, registry }: { page: any; registry: Reco
         <Tag color="orange">{page.support.contractPoints.length} contracts</Tag>
       </div>
     </header>
+    {showStateInspector && (visibilityGroups.length > 0 || geometryAudit.checked > 0) && <details className="migration-state-inspector">
+      <summary>迁移检查 · 状态 {visibilityGroups.length} · 几何 {geometryStatus}</summary>
+      <div className={"migration-geometry-audit " + (geometryAudit.issues.length > 0 ? "has-issues" : "is-clean")}>
+        <div><strong>布局自检</strong><span>已检查 {geometryAudit.checked} 个可见控件，容差 ±4px</span></div>
+        {geometryAudit.issues.length === 0
+          ? <p>{geometryAudit.checked > 0 ? "尺寸、位置、边界、裁剪与重叠均在规则内" : "正在测量…"}</p>
+          : <ol>{geometryAudit.issues.slice(0, 10).map((issue, issueIndex) => <li key={issue.type + ":" + issue.control + ":" + (issue.peer || "") + ":" + issueIndex}>
+            <strong>{issue.control} · {issue.type}</strong><span>{issue.kind} · {issue.message} · Δ{issue.maxDelta}px</span>
+          </li>)}</ol>}
+        {geometryAudit.issues.length > 10 && <small>另有 {geometryAudit.issues.length - 10} 个偏差控件</small>}
+      </div>
+      {visibilityGroups.length > 0 && <div className="migration-state-list">{visibilityGroups.map((group: any, groupIndex: number) => <label key={(group.sourceFile || "source") + ":" + (group.line || groupIndex)}>
+        <span title={group.condition}>{group.condition || "runtime condition"}</span>
+        <select aria-label={"Source state: " + (group.condition || groupIndex)} value={visibilityVariants[groupIndex] ?? Number(group.defaultVariant || 0)} onChange={(event) => selectVisibilityVariant(groupIndex, Number(event.target.value))}>
+          {(group.variants || []).map((variant: any, variantIndex: number) => <option value={variantIndex} key={variantIndex}>{variant.label || "variant " + (variantIndex + 1)}</option>)}
+        </select>
+        <small>{group.sourceFile || "source"}{group.line ? ":" + group.line : ""}</small>
+      </label>)}</div>}
+      <div className="migration-acceptance-recorder">
+        <div><strong>验收证据</strong><span>{page.name} · {acceptanceVariantKey}</span></div>
+        {acceptanceVariantLabels.length > 0 && <small>{acceptanceVariantLabels.join(" · ")}</small>}
+        <select aria-label="Acceptance decision" value={acceptanceDecision} onChange={(event) => setAcceptanceDecision(event.target.value as MigrationAcceptanceDecision | "")}>
+          <option value="">选择人工结论</option>
+          <option value="pass" disabled={geometryAudit.issues.length > 0}>通过（审计无偏差）</option>
+          <option value="accepted-difference">接受非阻塞差异</option>
+          <option value="blocked">阻塞，需要修复</option>
+        </select>
+        <textarea aria-label="Acceptance notes" value={acceptanceNotes} onChange={(event) => setAcceptanceNotes(event.target.value)} placeholder="接受差异或阻塞时，请记录原因" rows={2} />
+        <div className="migration-acceptance-actions"><button type="button" disabled={!acceptanceCanSave} onClick={() => saveAcceptance()}>保存当前状态</button>
+          {nextAcceptanceVariants && <button type="button" disabled={!acceptanceCanSave} onClick={saveAndAdvanceAcceptance}>保存并进入下一状态</button>}
+          <button type="button" onClick={() => downloadMigrationAcceptanceEvidence({ schemaVersion: 1, exportedAt: new Date().toISOString(), records: readMigrationAcceptanceRecords() })}>导出全部证据</button></div>
+        <small>{acceptanceRecordedAt ? "已记录 " + acceptanceRecordedAt : "当前状态尚未记录"}</small>
+      </div>
+    </details>}
     <div className="migration-canvas-scroll migration-layout-scroll">
       <div className="migration-canvas migration-layout-canvas" style={canvasStyle}>
-        <RuntimePageContext.Provider value={page}><RuntimeControlIndexContext.Provider value={index}><RuntimeControlStateProvider page={page} index={index}><RuntimeTabNavigatorContext.Provider value={runtimeTabNavigators}><RuntimeVisibilityContext.Provider value={defaultHiddenControls}><PreviewRuntimeProvider><NativeWindowFrame page={page}>{gitPreview && page.layout?.root
+        <ActionRuntimeProvider page={page}><RuntimePageContext.Provider value={page}><RuntimeControlIndexContext.Provider value={index}><RuntimeControlStateProvider page={page} index={index}><RuntimeTabNavigatorContext.Provider value={runtimeTabNavigators}><RuntimeVisibilityContext.Provider value={runtimeHiddenControls}><PreviewRuntimeProvider><NativeWindowFrame page={page}>{visualProfile.layoutMode === "semantic" && page.layout?.root
             ? <LayoutNodeView node={page.layout.root} index={index} registry={registry} depth={0} />
-            : <div className="native-fixed-client" style={fixedClientStyle}><RuntimeCoordinateSpaceContext.Provider value={{ width: sourceWidth, height: sourceHeight }}><ControlTree controls={page.controls} registry={registry} depth={0} /></RuntimeCoordinateSpaceContext.Provider></div>}</NativeWindowFrame></PreviewRuntimeProvider></RuntimeVisibilityContext.Provider></RuntimeTabNavigatorContext.Provider></RuntimeControlStateProvider></RuntimeControlIndexContext.Provider></RuntimePageContext.Provider>
+            : <div className="native-fixed-client" style={fixedClientStyle}><RuntimeCoordinateSpaceContext.Provider value={{ width: sourceWidth, height: sourceHeight }}><ControlTree controls={page.controls} registry={registry} depth={0} /></RuntimeCoordinateSpaceContext.Provider></div>}</NativeWindowFrame></PreviewRuntimeProvider></RuntimeVisibilityContext.Provider></RuntimeTabNavigatorContext.Provider></RuntimeControlStateProvider></RuntimeControlIndexContext.Provider></RuntimePageContext.Provider></ActionRuntimeProvider>
       </div>
     </div>
   </section>;
@@ -1071,10 +1683,15 @@ function LayoutNodeView({ node, index, registry, depth, contextName }: { node: L
 }
 
 function TabLayoutNode({ node, index, registry, depth, contextName, roleClass }: { node: LayoutNode; index: Map<string, Control>; registry: Record<string, React.ComponentType<DefinitionAdapterProps>>; depth: number; contextName?: string; roleClass: string }) {
-  const pages = node.children || [];
+  const runtimeHiddenControls = React.useContext(RuntimeVisibilityContext);
+  const pages = (node.children || []).filter((page: LayoutNode) => {
+    const sourceControl = index.get(page.controlName);
+    return !sourceControl || !runtimeHiddenControls.has(sourceControl);
+  });
   const runtimeTabs = node.runtimeTabs || [];
   const total = pages.length + runtimeTabs.length;
   const [active, setActive] = React.useState(Math.max(0, Math.min(total - 1, node.selectedIndex || 0)));
+  React.useEffect(() => setActive((value) => Math.max(0, Math.min(total - 1, value))), [total]);
   const tabListRef = React.useRef<HTMLDivElement>(null);
   const runtimeTab = active >= pages.length ? runtimeTabs[active - pages.length] : undefined;
   const keyboardTab = (event: React.KeyboardEvent<HTMLButtonElement>, pageIndex: number) => {
@@ -1101,15 +1718,13 @@ function TabLayoutNode({ node, index, registry, depth, contextName, roleClass }:
 function SplitLayoutNode({ node, index, registry, depth, contextName, roleClass }: { node: LayoutNode; index: Map<string, Control>; registry: Record<string, React.ComponentType<DefinitionAdapterProps>>; depth: number; contextName?: string; roleClass: string }) {
   const { leftPanelVisible, splitViewVertical } = usePreviewRuntime();
   const sourceRatio = Number(node.ratio || .5);
-  const fidelityRatio = /MainSplitContainer/i.test(node.controlName || "") ? .19
-    : /RightSplitContainer/i.test(node.controlName || "") ? .27
-      : /RevisionsSplitContainer/i.test(node.controlName || "") ? .55
-        : sourceRatio;
+  const splitFixture = workspacePreviewFixture.splitControls?.[String(node.controlName || "")];
+  const fidelityRatio = Number(splitFixture?.ratio ?? sourceRatio);
   const initialRatio = Math.min(.8, Math.max(.15, fidelityRatio));
   const [ratio, setRatio] = React.useState(initialRatio);
   const host = React.useRef<HTMLDivElement>(null);
   const drag = React.useRef<{ start: number; size: number; ratio: number } | null>(null);
-  const vertical = /RightSplitContainer/i.test(node.controlName || "") ? splitViewVertical : node.axis === "vertical";
+  const vertical = splitFixture?.runtimeOrientation ? splitViewVertical : node.axis === "vertical";
   const percent = Math.round(ratio * 1000) / 10;
   const style = vertical
     ? { gridTemplateRows: percent + "% 4px minmax(0, 1fr)" }
@@ -1141,7 +1756,7 @@ function SplitLayoutNode({ node, index, registry, depth, contextName, roleClass 
     event.preventDefault();
     setRatio((value) => Math.min(.85, Math.max(.15, value + (increase ? .025 : -.025))));
   };
-  if (/MainSplitContainer/i.test(node.controlName || "") && !leftPanelVisible) return <div className={"layout-single-pane" + roleClass} data-control={node.controlName}>
+  if (splitFixture?.hideFirstPaneWithLeftPanel && !leftPanelVisible) return <div className={"layout-single-pane" + roleClass} data-control={node.controlName}>
     <LayoutNodeView node={node.children?.[1]} index={index} registry={registry} depth={depth} contextName={contextName} />
   </div>;
   return <div ref={host} className={"layout-split axis-" + (vertical ? "vertical" : "horizontal") + roleClass} style={style} data-control={node.controlName} data-ratio={percent}>
@@ -1168,11 +1783,12 @@ function LayerLayoutNode({ node, index, registry, depth, contextName, roleClass 
 }
 
 function ControlTree({ controls, registry = {}, depth = 0, normalized = false, contextName }: { controls: Control[]; registry?: Record<string, React.ComponentType<DefinitionAdapterProps>>; depth?: number; normalized?: boolean; contextName?: string }) {
-  return <>{controls.map((control, index) => <ControlNode key={control.name} control={control} registry={registry} depth={depth} normalized={normalized}
-    zIndex={normalized ? undefined : controls.length - index} contextName={contextName} />)}</>;
+  return <>{controls.map((control, index) => <SourceGeometryProbe key={control.name} control={control} normalized={normalized}><SourceToolTip text={control.appearance?.toolTipText}><ControlNode control={control} registry={registry} depth={depth} normalized={normalized}
+    zIndex={normalized ? undefined : controls.length - index} contextName={contextName} /></SourceToolTip></SourceGeometryProbe>)}</>;
 }
 
 function ControlNode({ control, registry, depth, normalized = false, zIndex, contextName }: { control: Control; registry: Record<string, React.ComponentType<DefinitionAdapterProps>>; depth: number; normalized?: boolean; zIndex?: number; contextName?: string }) {
+  const actions = useActionRuntime();
   const runtimeHiddenControls = React.useContext(RuntimeVisibilityContext);
   const runtimeTabNavigators = React.useContext(RuntimeTabNavigatorContext);
   const runtimeControlState = React.useContext(RuntimeControlStateContext);
@@ -1181,7 +1797,7 @@ function ControlNode({ control, registry, depth, normalized = false, zIndex, con
   const coordinateSpace = React.useContext(RuntimeCoordinateSpaceContext);
   const sourceControl = control;
   const sourceTabs = runtimeTabNavigators.get(sourceControl);
-  if (runtimeHiddenControls.has(sourceControl) || sourceControl.properties?.nonVisual === true) return null;
+  if (runtimeHiddenControls.has(sourceControl) || sourceControl.properties?.nonVisual === true || actions.visibility[sourceControl.name] === false) return null;
   control = applyRuntimeControlBindings(sourceControl, runtimeControlState);
   const style = normalized ? normalizedControlStyle(control) : controlStyle(control, coordinateSpace);
   if (!normalized && zIndex !== undefined && style.position === "absolute") style.zIndex = zIndex;
@@ -1206,20 +1822,27 @@ function ControlNode({ control, registry, depth, normalized = false, zIndex, con
     case "TextBox":
     case "MaskedTextBox":
     case "ToolStripTextBox": {
+      const fallbackValue = String(control.text ?? control.properties?.Text ?? "");
+      const textChanged = control.events?.find((item: any) => item.event === "TextChanged");
+      const actionInput = actions.enabled ? { value: String(actions.values[control.name] ?? fallbackValue), onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+        actions.setValue(control.name, event.target.value);
+        if (textChanged) actions.invoke(control.name, textChanged.event, textChanged.handler);
+      } }
+        : { defaultValue: fallbackValue };
       if (control.kind !== "ToolStripTextBox" && control.appearance?.multiline === true) {
-        return <Input.TextArea style={textAreaStyle(style, control.appearance?.scrollBars)} className="native-text-area" defaultValue={String(control.text ?? control.properties?.Text ?? "")}
+        return <Input.TextArea style={textAreaStyle(style, control.appearance?.scrollBars)} className="native-text-area" {...actionInput}
           readOnly={control.appearance?.readOnly === true} disabled={control.appearance?.enabled === false}
           placeholder={control.appearance?.placeholderText} maxLength={control.appearance?.maxLength}
           wrap={control.appearance?.wordWrap === false ? "off" : "soft"} autoSize={false} />;
       }
       return <Input style={style} size="small" type={control.appearance?.passwordChar ? "password" : "text"}
-        defaultValue={String(control.text ?? control.properties?.Text ?? "")} readOnly={control.appearance?.readOnly === true}
+        {...actionInput} readOnly={control.appearance?.readOnly === true}
         disabled={control.appearance?.enabled === false} placeholder={control.appearance?.placeholderText}
         maxLength={control.appearance?.maxLength} />;
     }
     case "RichTextBox":
       return <Input.TextArea style={style} className="native-commit-editor" defaultValue={String(control.text ?? control.properties?.Text ?? "")}
-        placeholder={control.appearance?.placeholderText || (contextName === "Message" ? "Enter commit message" : undefined)} readOnly={control.appearance?.readOnly === true}
+        placeholder={control.appearance?.placeholderText || workspacePreviewFixture.richTextPlaceholders?.[String(contextName || "")]} readOnly={control.appearance?.readOnly === true}
         disabled={control.appearance?.enabled === false} maxLength={control.appearance?.maxLength} autoSize={false} />;
     case "NumericUpDown":
       return <InputNumber style={style} className="native-number-input" size="small" min={control.appearance?.minimum} max={control.appearance?.maximum}
@@ -1228,26 +1851,46 @@ function ControlNode({ control, registry, depth, normalized = false, zIndex, con
     case "DomainUpDown":
     case "ToolStripComboBox": {
       const editable = control.kind === "ComboBox" && control.appearance?.dropDownStyle !== "DropDownList";
-      const comboClass = (controlUsesVisualProfile(control, "opendental", "ComboBox") ? "native-od-combo " : "")
+      const comboClass = (controlVisualClass(control, "ComboBox") ? controlVisualClass(control, "ComboBox") + " " : "")
         + (editable ? "native-editable-combo" : "native-list-combo");
       const selectedItem = control.appearance?.selectedIndex >= 0 ? control.items?.[control.appearance.selectedIndex] : undefined;
+      const dynamicOptions = actions.options[control.name];
+      const comboOptions = dynamicOptions || (control.items || []).map((item: string) => ({ label: item, value: item }));
+      const selectionChanged = control.events?.find((item: any) => /^(?:SelectionChangeCommitted|SelectedIndexChanged)$/i.test(item.event));
       return <Select style={style} size="small" className={comboClass} disabled={control.appearance?.enabled === false}
         showSearch={editable} optionFilterProp="label" notFoundContent={null}
-        defaultValue={selectedItem ?? (control.text ? String(control.text) : undefined)}
-        options={(control.items || []).map((item: string) => ({ label: item, value: item }))} />;
+        {...(actions.enabled ? { value: actions.values[control.name] ?? undefined, onChange: (value: unknown) => {
+          actions.setValue(control.name, value);
+          if (selectionChanged) actions.invoke(control.name, selectionChanged.event, selectionChanged.handler);
+        } }
+          : { defaultValue: selectedItem ?? (control.text ? String(control.text) : undefined) })}
+        options={comboOptions} />;
     }
     case "CheckBox":
-      if (controlUsesVisualProfile(control, "opendental", "CheckBox")) {
-        const ProfileVisual = profileVisualComponent(control);
-        if (ProfileVisual) return <ProfileVisual control={control} style={style} text={text} />;
-      }
+      const fallbackChecked = runtimeControlState.getValue(control.name, "checked", control, runtimeControlScope);
+      const actionChecked = actions.enabled && Object.prototype.hasOwnProperty.call(actions.values, control.name)
+        ? Boolean(actions.values[control.name]) : fallbackChecked;
+      const setChecked = (checked: boolean) => {
+        actions.setValue(control.name, checked);
+        runtimeControlState.setValue(control.name, "checked", checked, runtimeControlScope);
+        const changed = control.events?.find((item: any) => /^(?:CheckedChanged|CheckStateChanged)$/i.test(item.event));
+        if (changed) actions.invoke(control.name, changed.event, changed.handler);
+      };
+      const ProfileVisual = profileVisualComponent(control);
+      if (ProfileVisual) return <ProfileVisual control={control} style={style} text={text} checked={actionChecked} onCheckedChange={setChecked} />;
       return <div style={style} className={"migration-check" + (control.appearance?.checkAlign?.horizontal === "Right" ? " check-right" : "")}>
-        <Checkbox disabled={control.appearance?.enabled === false} checked={runtimeControlState.getValue(control.name, "checked", control, runtimeControlScope)}
-          onChange={(event) => runtimeControlState.setValue(control.name, "checked", event.target.checked, runtimeControlScope)}>{text}</Checkbox></div>;
+        <Checkbox disabled={control.appearance?.enabled === false} checked={actionChecked}
+          onChange={(event) => setChecked(event.target.checked)}>{text}</Checkbox></div>;
     case "RadioButton":
       return <div style={style} className={"migration-check migration-radio" + (control.appearance?.checkAlign?.horizontal === "Right" ? " check-right" : "")}><Radio name={contextName || "wf-radio-group"}
         disabled={control.appearance?.enabled === false} defaultChecked={runtimeControlState.getValue(control.name, "checked", control, runtimeControlScope)}
-        onChange={(event) => runtimeControlState.setValue(control.name, "checked", event.target.checked, runtimeControlScope)}>{text}</Radio></div>;
+        onChange={(event) => {
+          runtimeControlState.setValue(control.name, "checked", event.target.checked, runtimeControlScope);
+          if (event.target.checked) {
+            const handler = control.events?.find((item: any) => item.event === "CheckedChanged")?.handler;
+            actions.invoke(control.name, "CheckedChanged", handler);
+          }
+        }}>{text}</Radio></div>;
     case "LinkLabel":
       return <button type="button" style={style} className="migration-link-label" disabled={control.appearance?.enabled === false}
         title={eventTitle(control)}>{text}</button>;
@@ -1260,13 +1903,14 @@ function ControlNode({ control, registry, depth, normalized = false, zIndex, con
     case "ToolStripProgressBar":
       return <div style={style} className="migration-progress"><span /></div>;
     case "TreeView":
-      return pageUsesVisualProfile(runtimePage, "gitextensions-workspace")
+      return pageVisualProfile(runtimePage).treeRole === "file-status"
         ? <FileStatusPreview control={control} contextName={contextName} style={style} />
         : <NativeTreeView control={control} style={style} />;
     case "ListBox":
       return <NativeListBox control={control} style={style} />;
     case "DataGridView":
     case "ListView": {
+      if (actions.grids[control.name]) return <SemanticDataGrid control={control} style={style} />;
       const defaultColumnWidth = control.kind === "ListView" ? 60 : 100;
       return <div style={style} className={"migration-grid native-" + control.kind.toLowerCase()}>
         {(control.columns || []).length > 0 && <div className="migration-grid-head">{(control.columns || []).map((column: any) => <span key={column.name}
@@ -1283,7 +1927,7 @@ function ControlNode({ control, registry, depth, normalized = false, zIndex, con
     case "TableLayoutPanel":
     case "FlowLayoutPanel":
     case "ToolStripContainer":
-      return <div style={style} className={"migration-container kind-" + control.kind.toLowerCase() + (controlUsesVisualProfile(control, "opendental", "GroupBox") ? " native-od-groupbox" : "")}>
+      return <div style={style} className={"migration-container kind-" + control.kind.toLowerCase() + (controlVisualClass(control, "GroupBox") ? " " + controlVisualClass(control, "GroupBox") : "")}>
         {control.kind === "GroupBox" && <span className="migration-container-title">{text}</span>}
         {children}
       </div>;
@@ -1302,9 +1946,11 @@ function ControlNode({ control, registry, depth, normalized = false, zIndex, con
 }
 
 function AbsoluteTabControl({ control, registry, depth, style }: { control: Control; registry: Record<string, React.ComponentType<DefinitionAdapterProps>>; depth: number; style: React.CSSProperties }) {
-  const pages = (control.children || []).filter((child: Control) => child.kind === "TabPage");
+  const runtimeHiddenControls = React.useContext(RuntimeVisibilityContext);
+  const pages = (control.children || []).filter((child: Control) => child.kind === "TabPage" && !runtimeHiddenControls.has(child));
   const initial = Math.max(0, Math.min(pages.length - 1, Number(control.appearance?.selectedIndex || 0)));
   const [active, setActive] = React.useState(initial);
+  React.useEffect(() => setActive((value) => Math.max(0, Math.min(pages.length - 1, value))), [pages.length]);
   const tabsRef = React.useRef<HTMLDivElement>(null);
   const keyboardTab = (event: React.KeyboardEvent<HTMLButtonElement>, pageIndex: number) => {
     let next = pageIndex;
@@ -1318,7 +1964,7 @@ function AbsoluteTabControl({ control, registry, depth, style }: { control: Cont
     window.requestAnimationFrame(() => (tabsRef.current?.querySelectorAll("button")[next] as HTMLButtonElement | undefined)?.focus());
   };
   const page = pages[active];
-  return <div style={style} className={"native-tabs native-absolute-tabs" + (control.appearance?.multiline === true ? " native-multiline-tabs" : "") + (controlUsesVisualProfile(control, "opendental", "TabControl") ? " native-od-tabs" : "")} data-control={control.name}>
+  return <div style={style} className={"native-tabs native-absolute-tabs" + (control.appearance?.multiline === true ? " native-multiline-tabs" : "") + (controlVisualClass(control, "TabControl") ? " " + controlVisualClass(control, "TabControl") : "")} data-control={control.name}>
     <div ref={tabsRef} className="native-tab-list" role="tablist">{pages.map((item: Control, pageIndex: number) => <button type="button" role="tab" disabled={item.appearance?.enabled === false} tabIndex={active === pageIndex ? 0 : -1} aria-selected={active === pageIndex} className={active === pageIndex ? "active" : ""} key={item.name} onClick={() => item.appearance?.enabled !== false && setActive(pageIndex)} onKeyDown={(event) => keyboardTab(event, pageIndex)}>{displayText(item) || "Tab " + (pageIndex + 1)}</button>)}</div>
     <div className="native-tab-page native-absolute-tab-page" role="tabpanel">{page && <RuntimeCoordinateSpaceContext.Provider value={{ width: page.bounds?.width, height: page.bounds?.height }}><ControlTree controls={page.children || []} registry={registry} depth={depth + 1} contextName={page.name} /></RuntimeCoordinateSpaceContext.Provider>}</div>
   </div>;
@@ -1327,10 +1973,10 @@ function AbsoluteTabControl({ control, registry, depth, style }: { control: Cont
 type TabTreeNode = { page: Control; children: TabTreeNode[] };
 type FlatTabTreeNode = TabTreeNode & { level: number; parent?: TabTreeNode };
 
-function tabTreeNodes(tabControl: Control): TabTreeNode[] {
-  return (tabControl.children || []).filter((child: Control) => child.kind === "TabPage").map((page: Control) => ({
+function tabTreeNodes(tabControl: Control, runtimeHiddenControls: ReadonlySet<Control>): TabTreeNode[] {
+  return (tabControl.children || []).filter((child: Control) => child.kind === "TabPage" && !runtimeHiddenControls.has(child)).map((page: Control) => ({
     page,
-    children: (page.children || []).filter((child: Control) => child.kind === "TabControl").flatMap((child: Control) => tabTreeNodes(child)),
+    children: (page.children || []).filter((child: Control) => child.kind === "TabControl").flatMap((child: Control) => tabTreeNodes(child, runtimeHiddenControls)),
   }));
 }
 
@@ -1343,12 +1989,18 @@ function firstTabLeaf(node?: TabTreeNode): TabTreeNode | undefined {
 }
 
 function TabTreeNavigator({ control, sourceTabs, registry, depth, style }: { control: Control; sourceTabs: Control; registry: Record<string, React.ComponentType<DefinitionAdapterProps>>; depth: number; style: React.CSSProperties }) {
-  const roots = tabTreeNodes(sourceTabs);
+  const runtimeHiddenControls = React.useContext(RuntimeVisibilityContext);
+  const roots = tabTreeNodes(sourceTabs, runtimeHiddenControls);
   const flat = flattenTabTree(roots);
   const sourceIndex = Math.max(0, Math.min(roots.length - 1, Number(sourceTabs.appearance?.selectedIndex || 0)));
   const autoSelectChild = control.properties?.AutoSelectChild !== false;
   const initial = autoSelectChild ? firstTabLeaf(roots[sourceIndex] || roots[0]) : roots[sourceIndex] || roots[0];
   const [selectedName, setSelectedName] = React.useState(initial?.page.name || "");
+  const initialName = initial?.page.name || "";
+  const selectedNameIsVisible = flat.some((item) => item.page.name === selectedName);
+  React.useEffect(() => {
+    if (!selectedNameIsVisible) setSelectedName(initialName);
+  }, [initialName, selectedName, selectedNameIsVisible]);
   const selectedEntry = flat.find((item) => item.page.name === selectedName) || flat[0];
   const selectedPage = selectedEntry?.page;
   const selectedPageStyle: React.CSSProperties = {
@@ -1394,25 +2046,32 @@ function TabTreeNavigator({ control, sourceTabs, registry, depth, style }: { con
 }
 
 function NativeListBox({ control, style }: { control: Control; style: React.CSSProperties }) {
-  const items = (control.items || []) as string[];
+  const actions = useActionRuntime();
+  const dynamicOptions = actions.options[control.name];
+  const items: ActionRuntimeOption[] = dynamicOptions || ((control.items || []) as string[]).map((item) => ({ label: item, value: item }));
   const initial = Math.max(-1, Math.min(items.length - 1, Number(control.appearance?.selectedIndex ?? -1)));
   const [selected, setSelected] = React.useState(initial);
+  const selectedValue = actions.enabled ? actions.values[control.name] : undefined;
+  const selectedIndex = actions.enabled && selectedValue !== undefined
+    ? items.findIndex((item) => Object.is(item.value, selectedValue) || String(item.value) === String(selectedValue))
+    : selected;
   const moveSelection = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (!items.length || control.appearance?.enabled === false) return;
-    let next = selected;
-    if (event.key === "ArrowDown") next = Math.min(items.length - 1, selected + 1);
-    else if (event.key === "ArrowUp") next = Math.max(0, selected < 0 ? 0 : selected - 1);
+    let next = selectedIndex;
+    if (event.key === "ArrowDown") next = Math.min(items.length - 1, selectedIndex + 1);
+    else if (event.key === "ArrowUp") next = Math.max(0, selectedIndex < 0 ? 0 : selectedIndex - 1);
     else if (event.key === "Home") next = 0;
     else if (event.key === "End") next = items.length - 1;
     else return;
     event.preventDefault();
     setSelected(next);
+    if (actions.enabled) actions.setValue(control.name, items[next]?.value);
   };
-  return <div style={style} className={"migration-list native-list-box" + (controlUsesVisualProfile(control, "opendental", "ListBox") ? " native-od-list-box" : "") + (control.appearance?.enabled === false ? " disabled" : "")}
+  return <div style={style} className={"migration-list native-list-box" + (controlVisualClass(control, "ListBox") ? " " + controlVisualClass(control, "ListBox") : "") + (control.appearance?.enabled === false ? " disabled" : "")}
     role="listbox" aria-disabled={control.appearance?.enabled === false} tabIndex={control.appearance?.enabled === false ? -1 : 0} onKeyDown={moveSelection}>
-    {items.map((item, index) => <div key={index} role="option" aria-selected={selected === index}
-      className={"native-list-box-item" + (selected === index ? " selected" : "")}
-      onClick={() => control.appearance?.enabled !== false && setSelected(index)}>{item}</div>)}
+    {items.map((item, index) => <div key={String(item.value) + ":" + index} role="option" aria-selected={selectedIndex === index}
+      className={"native-list-box-item" + (selectedIndex === index ? " selected" : "")}
+      onClick={() => { if (control.appearance?.enabled === false) return; setSelected(index); if (actions.enabled) actions.setValue(control.name, item.value); }}>{item.label}</div>)}
   </div>;
 }
 
@@ -1511,10 +2170,11 @@ function NativeTreeView({ control, style }: { control: Control; style: React.CSS
 }
 
 function FileStatusPreview({ control, contextName, style }: { control: Control; contextName?: string; style: React.CSSProperties }) {
-  const [selected, setSelected] = React.useState(contextName === "Staged" ? -1 : 1);
+  const staged = (workspacePreviewFixture.stagedContextNames || []).includes(String(contextName || ""));
+  const [selected, setSelected] = React.useState(staged ? -1 : 1);
   const [menu, setMenu] = React.useState<{ x: number; y: number } | null>(null);
   const treeItems = (control.treeRootNodes || []).slice(0, 8).map((name: string) => ({ status: "", path: control.treeNodeTexts?.[name] || name }));
-  const previewItems = contextName === "Staged" ? [] : previewFilePaths.slice(0, 4).map((path, index) => ({ status: index === 2 ? "A" : "M", path }));
+  const previewItems = staged ? [] : previewFilePaths.slice(0, 4).map((path, index) => ({ status: index === 2 ? "A" : "M", path }));
   const items = treeItems.length ? treeItems : previewItems;
   const openMenu = (event: React.MouseEvent<HTMLDivElement>, index: number) => {
     event.preventDefault();
@@ -1524,7 +2184,7 @@ function FileStatusPreview({ control, contextName, style }: { control: Control; 
     setMenu({ x: Math.max(4, Math.min(event.clientX - (list?.left || 0), (list?.width || 220) - 184)), y: Math.max(24, Math.min(event.clientY - (list?.top || 0), (list?.height || 180) - 128)) });
   };
   return <div style={style} className="migration-tree native-file-list" role="listbox" onClick={() => setMenu(null)}>
-    <div className="native-list-caption"><span>{contextName === "Staged" ? "Staged changes" : "Working dir changes"}</span><small>{items.length} files</small></div>
+    <div className="native-list-caption"><span>{staged ? "Staged changes" : "Working dir changes"}</span><small>{items.length} files</small></div>
     {items.map((item: any, index: number) => <div className={"migration-tree-row" + (index === selected ? " selected" : "")} key={item.path} role="option" aria-selected={index === selected} tabIndex={0}
       onClick={(event) => { event.stopPropagation(); setSelected(index); setMenu(null); }} onContextMenu={(event) => openMenu(event, index)}
       onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelected(index); } }}>
@@ -1532,7 +2192,7 @@ function FileStatusPreview({ control, contextName, style }: { control: Control; 
     </div>)}
     {!items.length && <div className="migration-tree-empty">There are no staged changes</div>}
     {menu && <div className="native-context-menu" role="menu" style={{ left: menu.x, top: menu.y }} onClick={(event) => event.stopPropagation()}>
-      <button type="button" role="menuitem" onClick={() => setMenu(null)}>{contextName === "Staged" ? "Unstage selected" : "Stage selected"}<kbd>S</kbd></button>
+      <button type="button" role="menuitem" onClick={() => setMenu(null)}>{staged ? "Unstage selected" : "Stage selected"}<kbd>S</kbd></button>
       <button type="button" role="menuitem" onClick={() => setMenu(null)}>Open working directory file</button>
       <button type="button" role="menuitem" onClick={() => setMenu(null)}>Open with difftool</button>
       <span className="context-separator" />
@@ -1703,21 +2363,9 @@ function ControlIcon({ control, className, fallback }: { control: Control; class
 }
 
 function displayText(control: Control): string {
-  const statusText: Record<string, string> = {
-    commitAuthorStatus: "Author configured", toolStripStatusBranchIcon: "⑂", branchNameLabel: "master",
-    remoteNameLabel: "origin/master", commitEndPadding: "",
-  };
-  if (control.name in statusText) return statusText[control.name];
+  const profileText = profileControlText(control);
+  if (profileText !== undefined) return profileText;
   if (control.text) return String(control.text).replace(/&/g, "");
-  const known: Record<string, string> = {
-    CommitAndPush: "Commit & push", btnResetAllChanges: "Reset all changes", btnResetUnstagedChanges: "Reset unstaged changes",
-    btnRefresh: "Refresh", btnCollapseGroups: "Collapse groups", btnAsTree: "Tree view", btnByPath: "Group by path",
-    btnByExtension: "Group by extension", btnByStatus: "Group by status", btnFindInFilesGitGrep: "Find in files",
-    nextChangeButton: "Next change", previousChangeButton: "Previous change", increaseNumberOfLines: "More context",
-    decreaseNumberOfLines: "Less context", showEntireFileButton: "Show entire file", settingsButton: "Settings",
-    toolStageAllItem: "Stage all", toolUnstageAllItem: "Unstage all",
-  };
-  if (known[control.name]) return known[control.name];
   if (["Button", "ToolStripButton", "ToolStripDropDownButton", "ToolStripSplitButton", "ToolStripMenuItem", "CheckBox", "RadioButton", "Label", "LinkLabel", "ToolStripLabel", "ToolStripStatusLabel", "GroupBox", "TabPage"].includes(control.kind)) return "";
   return labelFromName(control.name)
     .replace(/^(?:btn|tool|tsmi|cbo|lbl)\\s+/i, "")
@@ -1731,38 +2379,7 @@ function controlButtonGlyph(control: Control): string {
   if (/(?:Add|Plus|New)/i.test(icon)) return "+";
   if (/(?:Edit|Pencil)/i.test(icon)) return "✎";
   if (/(?:Search|Find)/i.test(icon)) return "⌕";
-  return buttonGlyph(control.name);
-}
-
-function buttonGlyph(name: string): string {
-  if (/commitandpush/i.test(name)) return "↗";
-  if (/commit/i.test(name)) return "✓";
-  if (/unstage/i.test(name)) return "↑";
-  if (/stage/i.test(name)) return "↓";
-  if (/reset/i.test(name)) return "↶";
-  if (/refresh/i.test(name)) return "↻";
-  if (/previous/i.test(name)) return "↑";
-  if (/next/i.test(name)) return "↓";
-  if (/increase/i.test(name)) return "+";
-  if (/decrease/i.test(name)) return "−";
-  if (/find|search/i.test(name)) return "⌕";
-  if (/toggleleft/i.test(name)) return "☰";
-  if (/togglesplit|commitinfoposition/i.test(name)) return "▥";
-  if (/levelup/i.test(name)) return "↑";
-  if (/worktree|branch/i.test(name)) return "⑂";
-  if (/workingdir/i.test(name)) return "⌂";
-  if (/pull/i.test(name)) return "↓";
-  if (/push/i.test(name)) return "↑";
-  if (/stash/i.test(name)) return "▣";
-  if (/explorer/i.test(name)) return "▧";
-  if (/shell/i.test(name)) return ">_";
-  if (/settings|options/i.test(name)) return "⚙";
-  if (/tree|path|extension|status/i.test(name)) return "▦";
-  return "";
-}
-
-function toolbarShowsText(control: Control): boolean {
-  return /(?:WorkingDir|branchSelect|ButtonCommit)$/i.test(control.name);
+  return profileControlGlyph(control);
 }
 
 function tabGlyph(label?: string): string {
@@ -1791,6 +2408,32 @@ body { margin: 0; background: #f4f6f8; color: #172033; font-family: Inter, ui-sa
 .migration-page-header h2 { margin: 0 0 4px; font-size: 18px; }
 .migration-page-header small { color: #778196; }
 .migration-badges { display: flex; gap: 6px; }
+.migration-state-inspector { position: fixed; z-index: 1000; right: 14px; bottom: 14px; width: auto; max-width: calc(100vw - 28px); color: #233044; background: rgba(255,255,255,.98); border: 1px solid #aeb8c5; border-radius: 6px; box-shadow: 0 10px 28px rgba(24,39,63,.22); font: 12px ui-sans-serif, system-ui, sans-serif; }
+.migration-state-inspector[open] { width: min(440px, calc(100vw - 28px)); max-height: min(620px, 82vh); overflow: auto; }
+.migration-state-inspector summary { padding: 8px 10px; color: #34445b; font-weight: 650; cursor: pointer; user-select: none; }
+.migration-geometry-audit { display: grid; gap: 6px; padding: 8px 10px; border-top: 1px solid #dbe1e8; border-bottom: 1px solid #dbe1e8; background: #f7f9fb; }
+.migration-geometry-audit > div { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+.migration-geometry-audit > div > span, .migration-geometry-audit li span { color: #657287; font-size: 10px; }
+.migration-geometry-audit p { margin: 0; color: #257242; }
+.migration-geometry-audit.has-issues p, .migration-geometry-audit.has-issues > div > strong { color: #a33a28; }
+.migration-geometry-audit ol { display: grid; gap: 5px; max-height: 220px; margin: 0; padding-left: 20px; overflow: auto; }
+.migration-geometry-audit li { padding-left: 2px; }
+.migration-geometry-audit li strong, .migration-geometry-audit li span { display: block; }
+.migration-geometry-audit > small { color: #a33a28; }
+.migration-state-list { display: grid; gap: 8px; max-height: min(440px, 70vh); padding: 0 10px 10px; overflow: auto; }
+.migration-state-list label { display: grid; grid-template-columns: minmax(0, 1fr) 1.35fr; gap: 3px 8px; align-items: center; }
+.migration-state-list label > span { overflow: hidden; color: #34445b; text-overflow: ellipsis; white-space: nowrap; }
+.migration-state-list select { min-width: 0; height: 26px; border: 1px solid #aeb8c5; border-radius: 3px; background: white; }
+.migration-state-list small { grid-column: 1 / -1; color: #778196; font-size: 10px; }
+.migration-acceptance-recorder { display: grid; gap: 6px; padding: 9px 10px 10px; border-top: 1px solid #dbe1e8; background: #fff; }
+.migration-acceptance-recorder > div:first-child { display: flex; justify-content: space-between; gap: 8px; }
+.migration-acceptance-recorder > div:first-child span, .migration-acceptance-recorder > small { color: #657287; font-size: 10px; }
+.migration-acceptance-recorder select, .migration-acceptance-recorder textarea { width: 100%; border: 1px solid #aeb8c5; border-radius: 3px; background: #fff; font: inherit; }
+.migration-acceptance-recorder select { height: 27px; }
+.migration-acceptance-recorder textarea { min-height: 44px; padding: 5px 6px; resize: vertical; }
+.migration-acceptance-actions { display: flex; gap: 6px; }
+.migration-acceptance-actions button { min-height: 27px; padding: 3px 9px; border: 1px solid #8b99aa; border-radius: 3px; background: #f4f6f8; }
+.migration-acceptance-actions button:disabled { color: #9299a3; background: #eceff2; }
 .migration-canvas-scroll { overflow: auto; min-height: calc(100vh - 72px); }
 .migration-layout-scroll { padding: 12px; }
 .migration-canvas { position: relative; overflow: hidden; margin: 0 auto; background: #efefef; border: 1px solid #8795a4; border-radius: 3px; box-shadow: 0 12px 32px rgba(34, 48, 73, .16); }
@@ -1828,7 +2471,8 @@ body { margin: 0; background: #f4f6f8; color: #172033; font-family: Inter, ui-sa
 .native-fixed-form :is(.ant-input,.ant-btn,.ant-select-selection-item,.ant-checkbox-wrapper,.ant-radio-wrapper) { line-height: normal; }
 .native-fixed-form .ant-input:focus, .native-fixed-form .ant-input-number-focused, .native-fixed-form .ant-select-focused .ant-select-selector { border-color: #0078d7 !important; box-shadow: inset 0 0 0 1px #0078d7 !important; }
 .native-fixed-form .ant-input[readonly], .native-fixed-form .ant-input.ant-input-disabled, .native-fixed-form .ant-input-number-disabled, .native-fixed-form .ant-select-disabled .ant-select-selector { color: #555 !important; background: #f0f0f0 !important; }
-.native-fixed-form .ant-select, .native-fixed-form .ant-select-selector { min-height: 0 !important; height: 100% !important; }
+.native-fixed-form .ant-select { min-height: 0 !important; }
+.native-fixed-form .ant-select-selector { min-height: 0 !important; height: 100% !important; }
 .native-fixed-form .ant-select-selection-item { line-height: normal !important; }
 .native-fixed-form .native-editable-combo .ant-select-selector { cursor: text !important; }
 .native-fixed-form .native-list-combo .ant-select-selector { cursor: default !important; }
@@ -1856,6 +2500,12 @@ body { margin: 0; background: #f4f6f8; color: #172033; font-family: Inter, ui-sa
 .native-command-toast { position: absolute; z-index: 80; right: 12px; bottom: 12px; display: grid; grid-template-columns: auto minmax(130px,1fr); gap: 2px 8px; min-width: 270px; max-width: 420px; padding: 7px 10px; color: #253242; background: #f9fbfd; border: 1px solid #8798aa; box-shadow: 2px 4px 12px rgba(0,0,0,.28); font: 11px "Segoe UI",sans-serif; }
 .native-command-toast strong { color: #2365a3; }
 .native-command-toast small { grid-column: 1 / -1; color: #6f7d8c; }
+.action-contract-panel { position: absolute; z-index: 90; right: 12px; bottom: 12px; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 280px; max-width: 460px; max-height: 220px; padding: 8px 10px; overflow: auto; color: #203040; background: #f7fbff; border: 1px solid #5c83aa; box-shadow: 2px 4px 12px rgba(0,0,0,.3); font: 11px "Segoe UI",sans-serif; }
+.action-contract-panel strong { color: #145c94; }
+.action-contract-panel.has-error { background: #fff6f4; border-color: #b95345; }
+.action-contract-panel.has-error strong { color: #a52d20; }
+.action-contract-panel ul { max-width: 100%; margin: 2px 0; padding-left: 18px; }
+.action-contract-panel button, .action-contract-panel a { min-height: 22px; padding: 2px 7px; color: #123f67; border: 1px solid #6a8cac; background: #fff; font: inherit; text-decoration: none; }
 .layout-control, .layout-layers, .layout-frame, .layout-stack, .layout-split, .layout-grid, .native-tabs, .native-tab-page, .layout-pane, .layout-child, .layout-grid-cell { min-width: 0; min-height: 0; }
 .layout-control, .layout-layers, .layout-frame, .layout-split, .layout-grid, .native-tabs { width: 100%; height: 100%; }
 .layout-split { display: grid; gap: 0; background: #d3d3d3; }
@@ -1963,6 +2613,19 @@ body { margin: 0; background: #f4f6f8; color: #172033; font-family: Inter, ui-sa
 .native-empty-toolbar { display: flex; align-items: center; height: 25px; color: #7b8490; font: 10px "Segoe UI",sans-serif; }
 .native-external-surface { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 3px; color: #43546a; background: repeating-linear-gradient(135deg,#f8f8f8,#f8f8f8 7px,#f1f1f1 7px,#f1f1f1 14px); font: 11px "Segoe UI",sans-serif; }
 .native-external-surface span { color: #8792a1; font-size: 9px; }
+.semantic-data-grid { display: flex; flex-direction: column; padding: 0; border: 1px solid #7a7a7a; background: #fff; }
+.semantic-data-grid-title { flex: 0 0 19px; min-height: 19px; padding: 2px 5px; overflow: hidden; color: #000; background: #f0f0f0; border-bottom: 1px solid #a6a6a6; font-weight: 600; text-align: center; white-space: nowrap; }
+.semantic-data-grid-body { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; overflow: hidden; }
+.semantic-data-grid-body > span { flex: 0 0 19px; border-bottom: 1px solid #ececec; }
+.semantic-data-grid-body > span:nth-child(even) { background: #fafafa; }
+.semantic-data-grid-body.has-rows { overflow: auto; }
+.semantic-data-grid-row { display: flex; flex: 0 0 19px; min-width: max-content; height: 19px; cursor: default; outline: none; border-bottom: 1px solid #ececec; }
+.semantic-data-grid-row:nth-child(even) { background: #fafafa; }
+.semantic-data-grid-row.selected { color: #fff; background: #0078d7; }
+.semantic-data-grid-row > span { min-width: 0; padding: 1px 4px; overflow: hidden; border-right: 1px solid #ececec; text-overflow: ellipsis; white-space: nowrap; }
+.semantic-menu-bar { display: flex; align-items: stretch; gap: 0; padding: 0; border: 0; background: #f0f0f0; }
+.semantic-menu-bar > button { min-width: 0; height: 100%; padding: 0 7px; color: #000; border: 0; background: transparent; font: inherit; }
+.semantic-menu-bar > button:hover, .semantic-menu-bar > button:focus-visible { background: #d7e7f7; outline: 1px solid #7aa5d2; outline-offset: -1px; }
 .semantic-date-input { display: flex; width: 100%; height: 100%; min-height: 21px; background: #fff; border: 1px solid #8e969e; }
 .semantic-date-input input { min-width: 0; width: 100%; padding: 1px 4px; color: inherit; border: 0; outline: 0; background: #fff; font: inherit; }
 .semantic-date-input button { flex: 0 0 21px; width: 21px; padding: 0; color: #303840; border: 0; border-left: 1px solid #b6bbc0; background: linear-gradient(#fff,#e5e5e5); font: 9px "Segoe UI",sans-serif; }
@@ -1979,6 +2642,9 @@ body { margin: 0; background: #f4f6f8; color: #172033; font-family: Inter, ui-sa
 .native-menu-command.ant-btn { display: flex; justify-content: flex-start; gap: 4px; padding-right: 3px; }
 .native-menu-command-arrow { display: grid; align-self: stretch; min-width: 13px; margin-left: auto; place-items: center; border-left: 1px solid #c1c5c9; font-size: 8px; }
 .native-menu-button-host { overflow: visible; }
+.source-tooltip-event-host, .source-geometry-probe { display: contents; }
+.native-source-tooltip { position: fixed; z-index: 3000; display: block; max-width: 420px; padding: 3px 6px; color: #000; white-space: pre-wrap; pointer-events: none; border: 1px solid #767676; border-radius: 1px; background: #ffffe1; box-shadow: 1px 2px 3px rgba(0,0,0,.24); font: 12px "Segoe UI",Tahoma,sans-serif; line-height: 1.35; animation: native-tooltip-in .08s ease-out; }
+@keyframes native-tooltip-in { from { opacity: 0; transform: translateY(-1px); } to { opacity: 1; transform: translateY(0); } }
 .native-menu-button-host > .ant-btn { position: relative; inset: auto; }
 .native-linked-menu { position: absolute; z-index: 1000; top: calc(100% + 1px); left: 0; display: flex; flex-direction: column; padding: 2px; color: #202020; border: 1px solid #979797; background: #f0f0f0; box-shadow: 2px 2px 4px rgba(0,0,0,.24); font: 12px "Segoe UI",sans-serif; }
 .native-linked-menu-item-host { position: relative; display: block; }

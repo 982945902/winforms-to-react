@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "replace-with-reviewer",
+  "reviewedAt": "2026-07-16T00:00:00.000Z",
+  "textAndIconsExact": false,
+  "geometryCoverage": 0,
+  "clientAreaExact": false,
+  "noLayoutDefects": false,
+  "stateMatches": false,
+  "notes": [
+    "Copy this file to reviews/<target>/<view-id>.json and record measured evidence."
+  ]
+}

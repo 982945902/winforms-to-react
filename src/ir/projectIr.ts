@@ -26,6 +26,8 @@ import { materializeComponentInitializationDefaults } from "../parser/componentI
 export type BuildProjectIROptions = {
   /** Wider source tree used to resolve inheritance, shared controls, assets, and runtime data types. */
   contextRoot?: string;
+  /** Explicit Designer files emitted as pages while input/context remain available for resolution. */
+  sourceFiles?: string[];
 };
 
 export async function buildProjectIR(inputPath: string, options: BuildProjectIROptions = {}): Promise<ProjectIR> {
@@ -40,10 +42,12 @@ export async function buildProjectIR(inputPath: string, options: BuildProjectIRO
   const definitions = await collectUserControlDefinitions(contextRoot, hierarchy.baseKindMap);
   const [converted, contextDesignerFiles] = await Promise.all([
     convertDesignerSources(sourceRoot, {
+      designerFiles: options.sourceFiles?.map((file) => resolve(file)),
       inlineUserControls: false,
       baseKindMap: hierarchy.baseKindMap,
       controlProps: hierarchy.controlProps,
       userControlDefs: definitions,
+      codeTypeSources: hierarchy.codeTypeSources,
     }),
     findDesignerFiles(contextRoot),
   ]);
@@ -62,9 +66,9 @@ export async function buildProjectIR(inputPath: string, options: BuildProjectIRO
     page.baseType = baseTypes[0];
     page.baseTypes = baseTypes;
   }
-  const usage = new Map<string, number>();
+  const pageUsage = new Map<string, number>();
   for (const page of pages) {
-    attachComponentRefs(page.controls, usage);
+    attachComponentRefs(page.controls, pageUsage);
   }
 
   const definitionControls = new Map<string, VisualControl[]>();
@@ -73,18 +77,34 @@ export async function buildProjectIR(inputPath: string, options: BuildProjectIRO
       .filter((form) => definitions.has(form.name))
       .map((form) => [form.name, form] as const),
   );
-  for (const [typeName, controls] of definitions) {
+  const definitionEdges = new Map<string, Map<string, number>>();
+  const pendingComponentIds = [...pageUsage.keys()];
+  const reachableComponentIds = new Set<string>();
+  while (pendingComponentIds.length > 0) {
+    const typeName = pendingComponentIds.shift()!;
+    if (reachableComponentIds.has(typeName)) continue;
+    reachableComponentIds.add(typeName);
+    const controls = definitions.get(typeName);
+    if (!controls) continue;
     const parsedDefinition = parsedDefinitionByType.get(typeName);
     const cloned = cloneControls(parsedDefinition?.controls ?? controls);
-    // Count references declared inside shared component definitions too. This
-    // keeps nested component graphs closed without multiplying definitions per
-    // host instance.
-    attachComponentRefs(cloned, usage);
+    // Keep one neutral definition per type, but retain its child-reference
+    // multiplicity. Effective runtime instance counts are calculated only after
+    // the reachable graph is closed, so a child inside a component used twice
+    // is counted twice without copying either definition.
+    const nestedUsage = new Map<string, number>();
+    attachComponentRefs(cloned, nestedUsage);
+    definitionEdges.set(typeName, nestedUsage);
     definitionControls.set(typeName, cloned);
+    for (const componentId of nestedUsage.keys()) {
+      if (!reachableComponentIds.has(componentId)) {
+        pendingComponentIds.push(componentId);
+      }
+    }
   }
+  const usage = effectiveComponentUsage(pageUsage, definitionEdges);
 
-  const componentIds = new Set<string>([...definitions.keys(), ...usage.keys()]);
-  const components: ComponentDefinition[] = [...componentIds]
+  const components: ComponentDefinition[] = [...reachableComponentIds]
     .sort((a, b) => a.localeCompare(b))
     .map((typeName) => {
       const controls = definitionControls.get(typeName) ?? [];
@@ -248,9 +268,14 @@ async function collectVisualAssets(
       return;
     }
     const entries = (await readdir(path, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name));
-    await Promise.all(entries
-      .filter((entry) => !entry.isDirectory() || !skip.has(entry.name))
-      .map((entry) => walk(join(path, entry.name))));
+    // Keep duplicate asset-key selection deterministic. Parallel traversal made
+    // "first source path wins" depend on filesystem timing when two projects
+    // contained the same basename (for example two centerline.png resources),
+    // so identical Refine/NocoBase conversions could emit different neutral IR.
+    for (const entry of entries) {
+      if (entry.isDirectory() && skip.has(entry.name)) continue;
+      await walk(join(path, entry.name));
+    }
   };
   await walk(sourceRoot);
 
@@ -326,6 +351,25 @@ function attachComponentRefs(
     }
     attachComponentRefs(control.children, usage);
   }
+}
+
+function effectiveComponentUsage(
+  pageUsage: ReadonlyMap<string, number>,
+  definitionEdges: ReadonlyMap<string, ReadonlyMap<string, number>>,
+): Map<string, number> {
+  const effective = new Map<string, number>();
+  const expand = (componentId: string, count: number, ancestors: ReadonlySet<string>) => {
+    effective.set(componentId, (effective.get(componentId) ?? 0) + count);
+    const nextAncestors = new Set(ancestors).add(componentId);
+    for (const [childId, childCount] of definitionEdges.get(componentId) ?? []) {
+      // Recursive Designer graphs cannot represent a finite WinForms control
+      // tree. Keep the reachable type, but do not multiply a cycle forever.
+      if (nextAncestors.has(childId)) continue;
+      expand(childId, count * childCount, nextAncestors);
+    }
+  };
+  for (const [componentId, count] of pageUsage) expand(componentId, count, new Set());
+  return effective;
 }
 
 function cloneControls(controls: VisualControl[]): VisualControl[] {
