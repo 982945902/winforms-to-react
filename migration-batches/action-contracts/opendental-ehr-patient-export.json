@@ -1,0 +1,98 @@
+{
+  "$schema": "./schema.json",
+  "schemaVersion": 1,
+  "id": "opendental-ehr-patient-export-v1",
+  "page": "FormEhrPatientExport",
+  "backend": {
+    "baseUrl": "http://127.0.0.1:5198",
+    "openApiPath": "/openapi/v1.json"
+  },
+  "operations": [
+    {
+      "operationId": "loadExportFilters",
+      "handler": "FormEhrPatientExport_Load",
+      "trigger": { "controlName": "FormEhrPatientExport", "event": "Load" },
+      "execution": "server",
+      "intent": "Load provider, clinic, site and feature-visibility filters without exposing database access to the browser.",
+      "capabilities": ["data", "ui"],
+      "transport": { "method": "GET", "path": "/api/ehr-patient-export/options" },
+      "response": {
+        "bindings": [
+          { "source": "providers", "targetControl": "comboProv", "target": "options", "labelField": "label", "valueField": "id" },
+          { "source": "clinics", "targetControl": "comboClinic", "target": "options", "labelField": "label", "valueField": "id" },
+          { "source": "sites", "targetControl": "comboSite", "target": "options", "labelField": "label", "valueField": "id" },
+          { "source": "clinicsEnabled", "targetControl": "comboClinic", "target": "visibility" },
+          { "source": "clinicsEnabled", "targetControl": "labelClinic", "target": "visibility" },
+          { "source": "sitesEnabled", "targetControl": "comboSite", "target": "visibility" },
+          { "source": "sitesEnabled", "targetControl": "labelSite", "target": "visibility" }
+        ]
+      }
+    },
+    {
+      "operationId": "searchExportPatients",
+      "handler": "butSearch_Click",
+      "trigger": { "controlName": "butSearch", "event": "Click" },
+      "execution": "server",
+      "intent": "Search active patients using the same six filters as Patients.GetExportList.",
+      "capabilities": ["data", "validation", "ui"],
+      "transport": { "method": "POST", "path": "/api/ehr-patient-export/search" },
+      "request": {
+        "fields": [
+          { "name": "patientNumber", "sourceControl": "textPatNum", "source": "value", "parse": "integer" },
+          { "name": "firstName", "sourceControl": "textFName", "source": "value", "parse": "string" },
+          { "name": "lastName", "sourceControl": "textLName", "source": "value", "parse": "string" },
+          { "name": "providerId", "sourceControl": "comboProv", "source": "selected-value", "parse": "integer" },
+          { "name": "clinicId", "sourceControl": "comboClinic", "source": "selected-value", "parse": "integer" },
+          { "name": "siteId", "sourceControl": "comboSite", "source": "selected-value", "parse": "integer" }
+        ]
+      },
+      "response": {
+        "bindings": [
+          {
+            "source": "items",
+            "targetControl": "gridMain",
+            "target": "rows",
+            "rowIdField": "patientNumber",
+            "columnFields": {
+              "gridMainRuntimeColumn1": "patientNumber",
+              "gridMainRuntimeColumn2": "patientName",
+              "gridMainRuntimeColumn3": "provider",
+              "gridMainRuntimeColumn4": "clinic",
+              "gridMainRuntimeColumn5": "site"
+            }
+          },
+          { "source": "status", "target": "status" }
+        ]
+      }
+    },
+    {
+      "operationId": "selectAllExportPatients",
+      "handler": "butSelectAll_Click",
+      "trigger": { "controlName": "butSelectAll", "event": "Click" },
+      "execution": "client",
+      "intent": "Select all currently visible patient rows without a server round trip.",
+      "capabilities": ["ui"],
+      "effect": { "kind": "select-all", "targetControl": "gridMain" }
+    },
+    {
+      "operationId": "createPatientExportArtifact",
+      "handler": "butExport_Click",
+      "trigger": { "controlName": "butExport", "event": "Click" },
+      "execution": "server",
+      "intent": "Validate settings and patients, generate CCD XML files, package them with CCD.xsl, and return a server-owned download artifact.",
+      "capabilities": ["data", "filesystem", "external-service", "security", "validation", "navigation", "ui"],
+      "transport": { "method": "POST", "path": "/api/ehr-patient-export/exports" },
+      "request": {
+        "fields": [
+          { "name": "patientNumbers", "sourceControl": "gridMain", "source": "selected-rows", "parse": "integer-array" }
+        ]
+      },
+      "response": {
+        "bindings": [
+          { "source": "downloadUrl", "target": "artifact" },
+          { "source": "message", "target": "status" }
+        ]
+      }
+    }
+  ]
+}

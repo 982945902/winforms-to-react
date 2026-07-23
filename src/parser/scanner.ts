@@ -1,8 +1,8 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, dirname, basename } from "node:path";
-import type { ControlCoverage, ControlSupportStatus, MigrationReport, VisualControl, VisualForm } from "../ir/types.js";
+import type { ControlCoverage, ControlSupportStatus, MigrationHint, MigrationReport, VisualControl, VisualForm } from "../ir/types.js";
 import { parseDesignerSource } from "./designerParser.js";
-import { parseCodeBehind, attachMigrationHints, type CodeBehindInfo } from "./codeBehindParser.js";
+import { parseCodeBehind, attachMigrationHints, type CodeBehindInfo, type CodeMethodInfo } from "./codeBehindParser.js";
 import { parseResx, applyResxToProps, type ResxData } from "./resxParser.js";
 
 export type ConvertSourceResult = {
@@ -11,16 +11,23 @@ export type ConvertSourceResult = {
 };
 
 export type ConvertSourceOptions = {
+  /** Explicit conversion scope; context discovery still uses inputPath. */
+  designerFiles?: string[];
   inlineUserControls?: boolean;
   baseKindMap?: Map<string, string>;
   controlProps?: Map<string, Array<{ name: string; type: string }>>;
   userControlDefs?: Map<string, VisualControl[]>;
+  codeTypeSources?: Map<string, string[]>;
 };
+
+function isDesignerFileName(value: string): boolean {
+  return /\.designer\.cs$/i.test(value);
+}
 
 export async function findDesignerFiles(inputPath: string): Promise<string[]> {
   const info = await stat(inputPath);
   if (info.isFile()) {
-    return inputPath.endsWith(".Designer.cs") ? [inputPath] : [];
+    return isDesignerFileName(inputPath) ? [inputPath] : [];
   }
   const files: string[] = [];
   await walk(inputPath, files);
@@ -28,16 +35,17 @@ export async function findDesignerFiles(inputPath: string): Promise<string[]> {
 }
 
 export async function convertDesignerSources(inputPath: string, options: ConvertSourceOptions = {}): Promise<ConvertSourceResult> {
-  const files = await findDesignerFiles(inputPath);
+  const files = options.designerFiles ? [...options.designerFiles] : await findDesignerFiles(inputPath);
   const hierarchy = options.baseKindMap && options.controlProps
-    ? { baseKindMap: options.baseKindMap, controlProps: options.controlProps }
+    ? { baseKindMap: options.baseKindMap, controlProps: options.controlProps, codeTypeSources: options.codeTypeSources ?? new Map<string, string[]>() }
     : await collectBaseKindMap(inputPath);
-  const { baseKindMap, controlProps } = hierarchy;
+  const { baseKindMap, controlProps, codeTypeSources } = hierarchy;
   const userControlDefs = options.userControlDefs
     ?? await collectUserControlDefinitions(inputPath, baseKindMap);
 
   const forms: VisualForm[] = [];
   const reports: MigrationReport[] = [];
+  const contextMethodCache = new Map<string, Promise<CodeMethodInfo[]>>();
 
   for (const file of files) {
     const source = await readFile(file, "utf8");
@@ -70,6 +78,7 @@ export async function convertDesignerSources(inputPath: string, options: Convert
       }
     }
     const cb = mergeCodeBehindInfos(codeBehindInfos);
+    cb.handlers = await expandExternalHandlerEvidence(cb, result.form.name, codeTypeSources, contextMethodCache);
     // Always attach: even without code-behind, every wired event must become a
     // contract point (goal: 100% coverage). Missing hints fall back to unresolved.
     attachMigrationHints(result.form, cb);
@@ -83,6 +92,8 @@ export async function convertDesignerSources(inputPath: string, options: Convert
     applyRuntimeValueHints(result.form, cb);
     applyRuntimeAppearanceHints(result.form, cb);
     applyPropertyGridHints(result.form, cb);
+    applyGridColumnHints(result.form, cb);
+    applyMenuItemHints(result.form, cb);
     if (cb.navigations.length) {
       // Drop false-positive navigations that target a menu/strip component:
       // `contextMenu.Show(point)` shows a popup at a location, not form navigation.
@@ -141,7 +152,8 @@ async function findCodeBehindFamily(designerPath: string): Promise<string[]> {
 
 function mergeCodeBehindInfos(infos: CodeBehindInfo[]): CodeBehindInfo {
   const unique = <T>(items: T[], key: (item: T) => string): T[] => [...new Map(items.map((item) => [key(item), item])).values()];
-  return {
+  const merged: CodeBehindInfo = {
+    fields: unique(infos.flatMap((info) => info.fields), (item) => `${item.ownerType}|${item.name}|${item.typeName}|${item.sourceFile}`),
     methods: unique(infos.flatMap((info) => info.methods), (item) => `${item.sourceFile}|${item.name}|${item.lineStart}`),
     handlers: unique(infos.flatMap((info) => info.handlers), (item) => `${item.sourceFile}|${item.handler}`),
     navigations: unique(infos.flatMap((info) => info.navigations), (item) => `${item.target}|${item.modal}|${item.fromHandler ?? ""}`),
@@ -162,7 +174,146 @@ function mergeCodeBehindInfos(infos: CodeBehindInfo[]): CodeBehindInfo {
       `${item.controlName}|${item.source.typeName ?? ""}|${item.source.expression}`),
     valueHints: unique(infos.flatMap((info) => info.valueHints), (item) =>
       `${item.controlName}|${item.source.property}|${item.source.sourceFile}|${item.source.line}`),
+    gridColumnHints: unique(infos.flatMap((info) => info.gridColumnHints), (item) =>
+      `${item.controlName}|${item.column.headerText ?? item.column.name}|${item.column.width ?? ""}`),
+    menuItemHints: unique(infos.flatMap((info) => info.menuItemHints), (item) =>
+      `${item.controlName}|${item.text}|${item.handler ?? ""}`),
   };
+  merged.handlers = expandHandlerEvidence(merged);
+  return merged;
+}
+
+async function expandExternalHandlerEvidence(
+  info: CodeBehindInfo,
+  ownerType: string,
+  codeTypeSources: Map<string, string[]>,
+  methodCache: Map<string, Promise<CodeMethodInfo[]>>,
+): Promise<CodeBehindInfo["handlers"]> {
+  const maxExternalFanOut = 8;
+  const maxOverloadsPerCall = 4;
+  const fieldTypes = new Map(info.fields
+    .filter((field) => field.ownerType === ownerType)
+    .map((field) => [field.name, field.typeName] as const));
+
+  const loadMethods = (typeName: string): Promise<CodeMethodInfo[]> => {
+    const existing = methodCache.get(typeName);
+    if (existing) return existing;
+    const loading = Promise.all((codeTypeSources.get(typeName) ?? []).map(async (file) => {
+      try {
+        return parseCodeBehind(await readFile(file, "utf8"), file).methods
+          .filter((method) => method.ownerType === typeName);
+      } catch {
+        return [];
+      }
+    })).then((groups) => groups.flat());
+    methodCache.set(typeName, loading);
+    return loading;
+  };
+
+  return Promise.all(info.handlers.map(async (handler) => {
+    const calls = [...new Set([...(handler.calledSymbols ?? []), ...(handler.transitiveCalledSymbols ?? [])])];
+    const externalCalls = calls.flatMap((symbol) => {
+      const parts = symbol.replace(/\?\./g, ".").replace(/^this\./, "").split(".");
+      if (parts.length !== 2) return [];
+      const typeName = fieldTypes.get(parts[0]);
+      return typeName ? [{ receiver: parts[0], typeName, methodName: parts[1] }] : [];
+    });
+    const uniqueCalls = [...new Map(externalCalls.map((call) => [`${call.typeName}.${call.methodName}`, call])).values()];
+    if (uniqueCalls.length === 0 || uniqueCalls.length > maxExternalFanOut) return handler;
+
+    const transitiveCalledSymbols = new Set(handler.transitiveCalledSymbols ?? []);
+    const propertyReads = new Set(handler.propertyReads ?? []);
+    const assignedSymbols = new Set(handler.assignedSymbols ?? []);
+    const constructedTypes = new Set(handler.constructedTypes ?? []);
+    const awaitedCalls = new Set(handler.awaitedCalls ?? []);
+    for (const call of uniqueCalls) {
+      const matches = (await loadMethods(call.typeName)).filter((method) => method.name === call.methodName);
+      if (matches.length === 0 || matches.length > maxOverloadsPerCall) continue;
+      transitiveCalledSymbols.add(`${call.typeName}.${call.methodName}`);
+      for (const method of matches) {
+        for (const symbol of method.calledSymbols) transitiveCalledSymbols.add(symbol);
+        for (const symbol of method.propertyReads) propertyReads.add(symbol);
+        for (const symbol of method.assignedSymbols) assignedSymbols.add(symbol);
+        for (const symbol of method.constructedTypes) constructedTypes.add(symbol);
+        for (const symbol of method.awaitedCalls) awaitedCalls.add(symbol);
+      }
+    }
+    return {
+      ...handler,
+      transitiveCalledSymbols: [...transitiveCalledSymbols].sort(),
+      propertyReads: [...propertyReads].sort(),
+      assignedSymbols: [...assignedSymbols].sort(),
+      constructedTypes: [...constructedTypes].sort(),
+      awaitedCalls: [...awaitedCalls].sort(),
+    };
+  }));
+}
+
+function expandHandlerEvidence(info: CodeBehindInfo): CodeBehindInfo["handlers"] {
+  // One helper hop captures the common handler -> domain operation shape while
+  // avoiding lifecycle chains such as Refresh -> Initialize -> whole-form setup.
+  const maxDepth = 1;
+  const maxVisitedMethods = 32;
+  const maxLocalFanOut = 4;
+  const methodsByName = new Map<string, CodeBehindInfo["methods"]>();
+  for (const method of info.methods) {
+    const methods = methodsByName.get(method.name) ?? [];
+    methods.push(method);
+    methodsByName.set(method.name, methods);
+  }
+  return info.handlers.map((handler) => {
+    const directCalledSymbols = new Set(handler.calledSymbols);
+    const calledSymbols = new Set(handler.calledSymbols);
+    const propertyReads = new Set(handler.propertyReads ?? []);
+    const assignedSymbols = new Set(handler.assignedSymbols ?? []);
+    const constructedTypes = new Set(handler.constructedTypes ?? []);
+    const awaitedCalls = new Set(handler.awaitedCalls ?? []);
+    const valueWrites = new Map((handler.valueWrites ?? []).map((write) => [valueWriteKey(write), write]));
+    const visited = new Set<string>();
+    const visit = (methodName: string, depth: number) => {
+      if (depth > maxDepth || visited.size >= maxVisitedMethods) return;
+      for (const method of methodsByName.get(methodName) ?? []) {
+        const key = `${method.sourceFile}|${method.name}|${method.lineStart}`;
+        if (visited.has(key)) continue;
+        visited.add(key);
+        for (const value of method.calledSymbols) calledSymbols.add(value);
+        for (const value of method.propertyReads) propertyReads.add(value);
+        for (const value of method.assignedSymbols) assignedSymbols.add(value);
+        for (const value of method.constructedTypes) constructedTypes.add(value);
+        for (const value of method.awaitedCalls) awaitedCalls.add(value);
+        for (const write of method.valueWrites) valueWrites.set(valueWriteKey(write), write);
+        const localCallees = [...new Set(method.calledSymbols
+          .map(localMethodName)
+          .filter((name): name is string => Boolean(name && methodsByName.has(name))))];
+        // Large coordinator/lifecycle methods fan out into most of a form. Their
+        // direct evidence is still useful, but recursively absorbing every branch
+        // creates false certainty for the originating click handler.
+        if (localCallees.length > maxLocalFanOut) continue;
+        for (const localName of localCallees) visit(localName, depth + 1);
+      }
+    };
+    visit(handler.handler, 0);
+    return {
+      ...handler,
+      calledSymbols: [...directCalledSymbols].sort(),
+      transitiveCalledSymbols: [...calledSymbols].filter((symbol) => !directCalledSymbols.has(symbol)).sort(),
+      propertyReads: [...propertyReads].sort(),
+      assignedSymbols: [...assignedSymbols].sort(),
+      constructedTypes: [...constructedTypes].sort(),
+      awaitedCalls: [...awaitedCalls].sort(),
+      valueWrites: [...valueWrites.values()].sort((left, right) => valueWriteKey(left).localeCompare(valueWriteKey(right))),
+    };
+  });
+}
+
+function valueWriteKey(write: NonNullable<MigrationHint["valueWrites"]>[number]): string {
+  return `${write.controlName}|${write.property}|${write.expression}|${Boolean(write.conditional)}|${String(write.literalValue ?? "")}`;
+}
+
+function localMethodName(symbol: string): string | undefined {
+  if (!symbol.includes(".")) return symbol;
+  if (/^(?:this|base)\.[A-Za-z_]\w*$/.test(symbol)) return symbol.split(".").pop();
+  return undefined;
 }
 
 function validRuntimeControlBindings(form: VisualForm, cb: CodeBehindInfo): NonNullable<VisualForm["runtimeControlBindings"]> {
@@ -240,6 +391,52 @@ function applyRuntimeItemHints(form: VisualForm, cb: CodeBehindInfo): void {
     }
     control.itemSources = sources;
   }
+}
+
+function applyGridColumnHints(form: VisualForm, cb: CodeBehindInfo): void {
+  if (cb.gridColumnHints.length === 0) return;
+  const index = controlIndex(form.controls);
+  for (const hint of cb.gridColumnHints) {
+    const control = index.get(hint.controlName);
+    if (!control) continue;
+    const columns = control.columns ?? [];
+    if (!columns.some((column) => column.headerText === hint.column.headerText && column.width === hint.column.width)) {
+      columns.push(hint.column);
+    }
+    control.columns = columns;
+  }
+}
+
+function applyMenuItemHints(form: VisualForm, cb: CodeBehindInfo): void {
+  if (cb.menuItemHints.length === 0) return;
+  const index = controlIndex(form.controls);
+  for (const hint of cb.menuItemHints) {
+    const control = index.get(hint.controlName);
+    if (!control) continue;
+    const items = control.items ?? [];
+    if (!items.includes(hint.text)) items.push(hint.text);
+    control.items = items;
+    if (hint.handler && !control.events.some((event) => event.event === "ItemClick" && event.handler === hint.handler)) {
+      const migrationHint = cb.handlers.find((handler) => handler.handler === hint.handler);
+      control.events.push({ event: "ItemClick", handler: hint.handler, ...(migrationHint ? { migrationHint } : {}) });
+      form.support.eventStubs.push({ controlName: control.name, event: "ItemClick", handler: hint.handler });
+      if (!form.support.contractPoints.some((point) => point.controlName === control.name && point.event === "ItemClick" && point.handler === hint.handler)) {
+        form.support.contractPoints.push(migrationHint
+          ? { ...migrationHint, controlName: control.name, event: "ItemClick" }
+          : { handler: hint.handler, sourceFile: "(handler not found)", lineStart: 0, lineEnd: 0, calledSymbols: [], controlName: control.name, event: "ItemClick" });
+      }
+    }
+  }
+}
+
+function controlIndex(controls: VisualControl[]): Map<string, VisualControl> {
+  const index = new Map<string, VisualControl>();
+  const visit = (items: VisualControl[]) => items.forEach((control) => {
+    index.set(control.name, control);
+    visit(control.children);
+  });
+  visit(controls);
+  return index;
 }
 
 function applyRuntimeValueHints(form: VisualForm, cb: CodeBehindInfo): void {
@@ -322,12 +519,16 @@ function isAutoGenerated(source: string): boolean {
   return false;
 }
 
-export async function collectBaseKindMap(inputPath: string): Promise<{ baseKindMap: Map<string, string>; controlProps: Map<string, Array<{ name: string; type: string }>> }> {
+export async function collectBaseKindMap(inputPath: string): Promise<{
+  baseKindMap: Map<string, string>;
+  controlProps: Map<string, Array<{ name: string; type: string }>>;
+  codeTypeSources: Map<string, string[]>;
+}> {
   const csFiles: string[] = [];
   const info = await stat(inputPath);
   if (info.isDirectory()) {
     await walkCs(inputPath, csFiles);
-  } else if (inputPath.endsWith(".Designer.cs")) {
+  } else if (isDesignerFileName(inputPath)) {
     // Single-form conversion already reads the matching code-behind for events.
     // Use that same family for inheritance and custom-control properties too, so
     // `FormX : ProjectFormBase` is not lost merely because the caller selected
@@ -337,11 +538,18 @@ export async function collectBaseKindMap(inputPath: string): Promise<{ baseKindM
 
   const map = new Map<string, string>();
   const controlProps = new Map<string, Array<{ name: string; type: string }>>();
+  const codeTypeSources = new Map<string, string[]>();
+  const typePattern = /\b(?:class|record|struct)\s+([A-Za-z_]\w*)\b/g;
   const classPattern = /^\s*(?:(?:public|internal|protected|private|sealed|abstract|static|partial)\s+)*class\s+([A-Za-z_]\w*)\s*:\s*([A-Za-z_][\w.<>]*)/gm;
   const propPattern = /^\s*public\s+([A-Za-z_][\w.\[\]<>?]*)\s+([A-Za-z_]\w*)\s*(?:\{\s*get[^{]*\}|=|;)/gm;
 
   for (const file of csFiles) {
     const source = await readFile(file, "utf8");
+    for (const match of source.matchAll(typePattern)) {
+      const files = codeTypeSources.get(match[1]) ?? [];
+      if (!files.includes(file)) files.push(file);
+      codeTypeSources.set(match[1], files);
+    }
     for (const match of source.matchAll(classPattern)) {
       const derived = match[1];
       const rawBase = match[2];
@@ -370,7 +578,7 @@ export async function collectBaseKindMap(inputPath: string): Promise<{ baseKindM
       if (props.length) controlProps.set(derived, props);
     }
   }
-  return { baseKindMap: map, controlProps };
+  return { baseKindMap: map, controlProps, codeTypeSources };
 }
 
 export async function collectUserControlDefinitions(
@@ -383,7 +591,7 @@ export async function collectUserControlDefinitions(
   const designerFiles: string[] = [];
   if (info.isDirectory()) {
     await walkDesigner(inputPath, designerFiles);
-  } else if (inputPath.endsWith(".Designer.cs")) {
+  } else if (isDesignerFileName(inputPath)) {
     designerFiles.push(inputPath);
   }
   const designerMap = new Map<string, string>();
@@ -462,7 +670,7 @@ async function walkDesigner(dir: string, files: string[]) {
     if (entry.name === "bin" || entry.name === "obj" || entry.name === ".git") continue;
     const fullPath = join(dir, entry.name);
     if (entry.isDirectory()) await walkDesigner(fullPath, files);
-    else if (entry.isFile() && entry.name.endsWith(".Designer.cs")) files.push(fullPath);
+    else if (entry.isFile() && isDesignerFileName(entry.name)) files.push(fullPath);
   }
 }
 
@@ -474,7 +682,7 @@ async function walkCs(dir: string, files: string[]) {
     if (entry.name === "bin" || entry.name === "obj" || entry.name === ".git") continue;
     const fullPath = join(dir, entry.name);
     if (entry.isDirectory()) await walkCs(fullPath, files);
-    else if (entry.isFile() && entry.name.endsWith(".cs") && !entry.name.endsWith(".Designer.cs")) files.push(fullPath);
+    else if (entry.isFile() && /\.cs$/i.test(entry.name) && !isDesignerFileName(entry.name)) files.push(fullPath);
   }
 }
 
@@ -485,7 +693,7 @@ async function walk(dir: string, files: string[]) {
     const fullPath = join(dir, entry.name);
     if (entry.isDirectory()) {
       await walk(fullPath, files);
-    } else if (entry.isFile() && entry.name.endsWith(".Designer.cs")) {
+    } else if (entry.isFile() && isDesignerFileName(entry.name)) {
       files.push(fullPath);
     }
   }

@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/wf2react/action-contract.schema.json",
+  "title": "Target-neutral ActionContract plan",
+  "type": "object",
+  "required": ["schemaVersion", "id", "page", "backend", "operations"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": { "const": 1 },
+    "id": { "type": "string", "minLength": 1 },
+    "page": { "type": "string", "minLength": 1 },
+    "backend": {
+      "type": "object",
+      "required": ["baseUrl"],
+      "additionalProperties": false,
+      "properties": {
+        "baseUrl": { "type": "string", "minLength": 1 },
+        "openApiPath": { "type": "string" }
+      }
+    },
+    "operations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["operationId", "handler", "execution", "intent", "capabilities"],
+        "oneOf": [
+          { "required": ["trigger"], "not": { "required": ["triggers"] } },
+          { "required": ["triggers"], "not": { "required": ["trigger"] } }
+        ],
+        "properties": {
+          "operationId": { "type": "string", "minLength": 1 },
+          "handler": { "type": "string", "minLength": 1 },
+          "trigger": {
+            "type": "object",
+            "required": ["controlName", "event"],
+            "properties": {
+              "controlName": { "type": "string" },
+              "event": { "type": "string" }
+            }
+          },
+          "triggers": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "object",
+              "required": ["controlName", "event"],
+              "properties": {
+                "controlName": { "type": "string" },
+                "event": { "type": "string" }
+              }
+            }
+          },
+          "execution": { "enum": ["server", "client"] },
+          "intent": { "type": "string", "minLength": 1 },
+          "capabilities": {
+            "type": "array",
+            "items": { "enum": ["data", "filesystem", "external-service", "security", "navigation", "validation", "ui"] }
+          },
+          "transport": {
+            "type": "object",
+            "required": ["method", "path"],
+            "properties": {
+              "method": { "enum": ["GET", "POST"] },
+              "path": { "type": "string", "pattern": "^/" }
+            }
+          },
+          "request": {
+            "type": "object",
+            "required": ["fields"],
+            "properties": {
+              "fields": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["name", "sourceControl", "source"],
+                  "properties": {
+                    "name": { "type": "string" },
+                    "sourceControl": { "type": "string" },
+                    "source": { "enum": ["value", "checked", "selected-value", "selected-values", "selected-rows", "trigger-control"] },
+                    "parse": { "enum": ["string", "integer", "boolean", "string-array", "integer-array"] }
+                  }
+                }
+              }
+            }
+          },
+          "response": {
+            "type": "object",
+            "required": ["bindings"],
+            "properties": {
+              "bindings": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["source", "target"],
+                  "properties": {
+                    "source": { "type": "string" },
+                    "targetControl": { "type": "string" },
+                    "target": { "enum": ["options", "visibility", "value", "rows", "artifact", "status"] },
+                    "labelField": { "type": "string" },
+                    "valueField": { "type": "string" },
+                    "rowIdField": { "type": "string" },
+                    "columnFields": {
+                      "type": "object",
+                      "additionalProperties": { "type": "string", "minLength": 1 }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "effect": {
+            "type": "object",
+            "required": ["kind", "targetControl"],
+            "properties": {
+              "kind": { "enum": ["select-all", "clear-all", "focus", "copy-value", "set-value", "transform-value"] },
+              "targetControl": { "type": "string" },
+              "targetProperty": { "enum": ["text", "checked", "selectedIndex", "value"] },
+              "value": { "type": ["string", "number", "boolean"] },
+              "transform": { "enum": ["uppercase", "lowercase", "trim"] }
+            },
+            "allOf": [
+              {
+                "if": { "properties": { "kind": { "const": "set-value" } } },
+                "then": { "required": ["value"] }
+              },
+              {
+                "if": { "properties": { "kind": { "const": "transform-value" } } },
+                "then": { "required": ["transform"] }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

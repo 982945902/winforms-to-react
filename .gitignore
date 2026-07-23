@@ -5,3 +5,6 @@ coverage/
 *.log
 out/
 tmp/
+bin/
+obj/
+core

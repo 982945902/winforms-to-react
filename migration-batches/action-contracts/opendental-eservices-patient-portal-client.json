@@ -1,0 +1,18 @@
+{
+  "$schema": "./schema.json",
+  "schemaVersion": 1,
+  "id": "opendental-eservices-patient-portal-client-v1",
+  "page": "FormEServicesPatientPortal",
+  "backend": { "baseUrl": "http://127.0.0.1:5199" },
+  "operations": [
+    {
+      "operationId": "copyHostedPatientPortalUrl",
+      "handler": "butCopyToClipboard_Click",
+      "trigger": { "controlName": "butCopyToClipboard", "event": "Click" },
+      "execution": "client",
+      "intent": "Copy the hosted patient portal URL to the clipboard.",
+      "capabilities": ["ui"],
+      "effect": { "kind": "copy-value", "targetControl": "textHostedUrlPortal" }
+    }
+  ]
+}

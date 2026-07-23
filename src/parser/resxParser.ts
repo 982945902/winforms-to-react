@@ -115,6 +115,7 @@ export type ResxProps = {
   passwordChar?: string;
   maxLength?: number;
   placeholderText?: string;
+  toolTipText?: string;
   scrollBars?: string;
   dropDownStyle?: string;
   minimumSize?: { width: number; height: number };
@@ -217,6 +218,7 @@ export function applyResxToProps(controlName: string, resx: ResxData): ResxProps
   result.flatStyle = props.get("FlatStyle");
   result.passwordChar = props.get("PasswordChar");
   result.placeholderText = props.get("PlaceholderText") ?? props.get("WatermarkText") ?? props.get("CueBannerText");
+  result.toolTipText = props.get("ToolTip") ?? props.get("ToolTipText");
   result.scrollBars = props.get("ScrollBars");
   result.dropDownStyle = props.get("DropDownStyle");
   const maxLength = Number(props.get("MaxLength"));

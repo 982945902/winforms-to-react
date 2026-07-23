@@ -437,6 +437,8 @@ describe("parseDesignerSource list items", () => {
         this.notes = new System.Windows.Forms.TextBox();
         this.secret = new System.Windows.Forms.TextBox();
         this.mode = new System.Windows.Forms.ComboBox();
+        this.helpTip.SetToolTip(this.authorize, resources.GetString("authorize.ToolTip"));
+        this.helpTip.SetToolTip(this.notes, "Notes can span multiple lines");
         this.Controls.Add(this.authorize);
         this.Controls.Add(this.notes);
         this.Controls.Add(this.secret);
@@ -449,6 +451,7 @@ describe("parseDesignerSource list items", () => {
           ["TextAlign", "MiddleLeft"], ["BackColor", "Window"], ["ForeColor", "Navy"],
           ["BorderStyle", "FixedSingle"], ["Padding", "1, 2, 3, 4"], ["Margin", "5, 6, 7, 8"],
           ["RightToLeft", "Yes"], ["FlatStyle", "Flat"], ["MinimumSize", "70, 20"], ["MaximumSize", "100, 30"],
+          ["ToolTip", "Authorize this account"],
         ])],
         ["notes", new Map([
           ["ReadOnly", "True"], ["Multiline", "True"], ["WordWrap", "False"], ["MaxLength", "80"], ["ScrollBars", "Vertical"],
@@ -473,9 +476,11 @@ describe("parseDesignerSource list items", () => {
       flatStyle: "Flat",
       minimumSize: { width: 70, height: 20 },
       maximumSize: { width: 100, height: 30 },
+      toolTipText: "Authorize this account",
     }));
     expect(result.controlsByName.get("notes")?.appearance).toEqual(expect.objectContaining({
       readOnly: true, multiline: true, wordWrap: false, maxLength: 80, scrollBars: "Vertical",
+      toolTipText: "Notes can span multiple lines",
     }));
     expect(result.controlsByName.get("secret")?.appearance.passwordChar).toBe("•");
     expect(result.controlsByName.get("mode")?.appearance.dropDownStyle).toBe("DropDownList");

@@ -2,8 +2,9 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { buildActionContractCandidateReport } from "../src/actionContractCandidates.js";
 import { buildProjectIR } from "../src/ir/projectIr.js";
-import { convertDesignerSources } from "../src/parser/scanner.js";
+import { convertDesignerSources, findDesignerFiles } from "../src/parser/scanner.js";
 
 const FIRST_FORM = `
 partial class FirstForm
@@ -37,6 +38,59 @@ partial class SecondForm
 `;
 
 describe("convertDesignerSources", () => {
+  it("attaches code-behind grid columns and menu items to neutral controls", async () => {
+    const root = await mkdtemp(join(tmpdir(), "wf2react-runtime-surfaces-"));
+    try {
+      await writeFile(join(root, "GridOD.cs"), "class GridOD : System.Windows.Forms.UserControl { }", "utf8");
+      await writeFile(join(root, "MenuOD.cs"), "class MenuOD : System.Windows.Forms.UserControl { }", "utf8");
+      await writeFile(join(root, "PatientForm.Designer.cs"), `partial class PatientForm {
+        private GridOD gridMain;
+        private MenuOD menuMain;
+        private void InitializeComponent() {
+          this.gridMain = new GridOD();
+          this.menuMain = new MenuOD();
+          this.Controls.Add(this.gridMain);
+          this.Controls.Add(this.menuMain);
+        }
+      }`, "utf8");
+      await writeFile(join(root, "PatientForm.cs"), `partial class PatientForm : System.Windows.Forms.Form {
+        void FillGrid() {
+          GridColumn column=new GridColumn("Patient",120);
+          gridMain.Columns.Add(column);
+        }
+        void LayoutMenu() { menuMain.Add(new MenuItemOD("Export",menuExport_Click)); }
+        void menuExport_Click(object sender, System.EventArgs e) { ExportPatients(); }
+      }`, "utf8");
+
+      const result = await convertDesignerSources(root);
+      const controls = result.forms[0].controls;
+      const grid = controls.find((control) => control.name === "gridMain");
+      const menu = controls.find((control) => control.name === "menuMain");
+      expect(grid?.columns).toEqual([{ name: "gridMainRuntimeColumn1", headerText: "Patient", width: 120, kind: "GridColumn" }]);
+      expect(menu?.items).toEqual(["Export"]);
+      expect(menu?.events).toEqual([expect.objectContaining({ event: "ItemClick", handler: "menuExport_Click" })]);
+      expect(result.forms[0].support.contractPoints).toContainEqual(expect.objectContaining({ controlName: "menuMain", event: "ItemClick", handler: "menuExport_Click" }));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("discovers Designer suffixes case-insensitively", async () => {
+    const root = await mkdtemp(join(tmpdir(), "wf2react-designer-case-"));
+    try {
+      const designer = join(root, "FirstForm.designer.cs");
+      await writeFile(designer, FIRST_FORM, "utf8");
+      await writeFile(join(root, "FirstForm.cs"), "partial class FirstForm : Form { }", "utf8");
+
+      expect(await findDesignerFiles(designer)).toEqual([designer]);
+      expect(await findDesignerFiles(root)).toEqual([designer]);
+      const result = await convertDesignerSources(root);
+      expect(result.forms.map((form) => form.name)).toEqual(["FirstForm"]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("retains the form base type when converting a single Designer file", async () => {
     const root = await mkdtemp(join(tmpdir(), "wf2react-single-inherit-"));
     try {
@@ -223,6 +277,194 @@ public partial class OrderForm : Form {
       expect(form.navigations).toEqual([
         { target: "DetailForm", modal: true, fromHandler: "btnDetail_Click" }
       ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("expands handler evidence through local helper methods across partial files", async () => {
+    const root = await mkdtemp(join(tmpdir(), "wf2react-transitive-evidence-"));
+    try {
+      await writeFile(join(root, "PatientForm.Designer.cs"), `partial class PatientForm {
+        private System.Windows.Forms.Button buttonSave;
+        private System.Windows.Forms.TextBox textName;
+        private void InitializeComponent() {
+          this.buttonSave = new System.Windows.Forms.Button();
+          this.textName = new System.Windows.Forms.TextBox();
+          this.buttonSave.Click += new System.EventHandler(this.buttonSave_Click);
+          this.Controls.Add(this.buttonSave);
+          this.Controls.Add(this.textName);
+        }
+      }`, "utf8");
+      await writeFile(join(root, "PatientForm.cs"), `partial class PatientForm : System.Windows.Forms.Form {
+        private void buttonSave_Click(object sender, System.EventArgs e) { SavePatient(); }
+      }`, "utf8");
+      await writeFile(join(root, "PatientForm.Actions.cs"), `partial class PatientForm {
+        private void SavePatient() {
+          textName.Text = patient.Name;
+          PatientService.Save(patient);
+        }
+      }`, "utf8");
+
+      const result = await convertDesignerSources(root);
+      const hint = result.forms[0].support.contractPoints.find((point) => point.handler === "buttonSave_Click");
+      expect(hint?.calledSymbols).toEqual(["SavePatient"]);
+      expect(hint?.transitiveCalledSymbols).toContain("PatientService.Save");
+      expect(hint?.assignedSymbols).toContain("textName.Text");
+      expect(hint?.propertyReads).toContain("patient.Name");
+      expect(hint?.valueWrites).toContainEqual({ controlName: "textName", property: "text", expression: "patient.Name" });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves a field receiver into one external project type and preserves its SQL boundary", async () => {
+    const root = await mkdtemp(join(tmpdir(), "wf2react-cross-type-evidence-"));
+    try {
+      await writeFile(join(root, "OrdersForm.Designer.cs"), `partial class OrdersForm {
+        private System.Windows.Forms.Button buttonLoad;
+        private void InitializeComponent() {
+          this.buttonLoad = new System.Windows.Forms.Button();
+          this.buttonLoad.Click += new System.EventHandler(this.buttonLoad_Click);
+          this.Controls.Add(this.buttonLoad);
+        }
+      }`, "utf8");
+      await writeFile(join(root, "OrdersForm.cs"), `partial class OrdersForm : System.Windows.Forms.Form {
+        OrderGateway gateway = new OrderGateway();
+        private void buttonLoad_Click(object sender, System.EventArgs e) { gateway.Read(); }
+      }`, "utf8");
+      // The filename intentionally differs from the type name: resolution is
+      // based on project declarations, not a filename or variable-name guess.
+      await writeFile(join(root, "Persistence.cs"), `class OrderGateway {
+        public object Read() {
+          var connection = new System.Data.SqlClient.SqlConnection();
+          connection.Open();
+          return null;
+        }
+      }`, "utf8");
+
+      const project = await buildProjectIR(root);
+      const point = project.pages[0].support.contractPoints[0];
+      expect(point.calledSymbols).toEqual(["gateway.Read"]);
+      expect(point.transitiveCalledSymbols).toContain("OrderGateway.Read");
+      expect(point.constructedTypes).toContain("System.Data.SqlClient.SqlConnection");
+      const candidate = buildActionContractCandidateReport(project).pages[0].items[0];
+      expect(candidate).toMatchObject({ capabilities: expect.arrayContaining(["data"]), suggestedExecution: "server" });
+      expect(candidate.capabilityEvidence).toContainEqual({
+        capability: "data", kind: "construction", symbol: "System.Data.SqlClient.SqlConnection",
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not expand high-fan-out cross-type coordinator calls", async () => {
+    const root = await mkdtemp(join(tmpdir(), "wf2react-cross-type-bounded-"));
+    try {
+      await writeFile(join(root, "F.Designer.cs"), `partial class F {
+        private System.Windows.Forms.Button buttonRun;
+        private void InitializeComponent() {
+          this.buttonRun = new System.Windows.Forms.Button();
+          this.buttonRun.Click += new System.EventHandler(this.buttonRun_Click);
+          this.Controls.Add(this.buttonRun);
+        }
+      }`, "utf8");
+      await writeFile(join(root, "F.cs"), `partial class F : System.Windows.Forms.Form {
+        Gateway gateway = new Gateway();
+        private void buttonRun_Click(object sender, System.EventArgs e) {
+          gateway.Step1(); gateway.Step2(); gateway.Step3(); gateway.Step4(); gateway.Step5();
+          gateway.Step6(); gateway.Step7(); gateway.Step8(); gateway.Step9();
+        }
+      }`, "utf8");
+      await writeFile(join(root, "Gateway.cs"), `class Gateway {
+        public void Step1() { new System.Data.SqlClient.SqlConnection(); }
+        public void Step2() { new System.Data.SqlClient.SqlConnection(); }
+        public void Step3() { new System.Data.SqlClient.SqlConnection(); }
+        public void Step4() { new System.Data.SqlClient.SqlConnection(); }
+        public void Step5() { new System.Data.SqlClient.SqlConnection(); }
+        public void Step6() { new System.Data.SqlClient.SqlConnection(); }
+        public void Step7() { new System.Data.SqlClient.SqlConnection(); }
+        public void Step8() { new System.Data.SqlClient.SqlConnection(); }
+        public void Step9() { new System.Data.SqlClient.SqlConnection(); }
+      }`, "utf8");
+
+      const project = await buildProjectIR(root);
+      const point = project.pages[0].support.contractPoints[0];
+      expect(point.transitiveCalledSymbols).toEqual([]);
+      expect(point.constructedTypes).toEqual([]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("counts nested shared component instances through repeated parent definitions", async () => {
+    const root = await mkdtemp(join(tmpdir(), "wf2react-nested-component-usage-"));
+    try {
+      await writeFile(join(root, "ChildEditor.cs"), `partial class ChildEditor : System.Windows.Forms.UserControl { }`, "utf8");
+      await writeFile(join(root, "ChildEditor.Designer.cs"), `partial class ChildEditor {
+        private System.Windows.Forms.TextBox textValue;
+        private void InitializeComponent() {
+          this.textValue = new System.Windows.Forms.TextBox();
+          this.Controls.Add(this.textValue);
+        }
+      }`, "utf8");
+      await writeFile(join(root, "SettingsSection.cs"), `partial class SettingsSection : System.Windows.Forms.UserControl { }`, "utf8");
+      await writeFile(join(root, "SettingsSection.Designer.cs"), `partial class SettingsSection {
+        private ChildEditor childEditor1;
+        private void InitializeComponent() {
+          this.childEditor1 = new ChildEditor();
+          this.Controls.Add(this.childEditor1);
+        }
+      }`, "utf8");
+      for (const formName of ["FirstForm", "SecondForm"]) {
+        await writeFile(join(root, `${formName}.cs`), `partial class ${formName} : System.Windows.Forms.Form { }`, "utf8");
+        await writeFile(join(root, `${formName}.Designer.cs`), `partial class ${formName} {
+          private SettingsSection settingsSection1;
+          private void InitializeComponent() {
+            this.settingsSection1 = new SettingsSection();
+            this.Controls.Add(this.settingsSection1);
+          }
+        }`, "utf8");
+      }
+
+      const project = await buildProjectIR(root, {
+        sourceFiles: [join(root, "FirstForm.Designer.cs"), join(root, "SecondForm.Designer.cs")],
+      });
+      expect(project.pages.map((page) => page.name).sort()).toEqual(["FirstForm", "SecondForm"]);
+      expect(project.components.map(({ id, instanceCount }) => ({ id, instanceCount }))).toEqual([
+        { id: "ChildEditor", instanceCount: 2 },
+        { id: "SettingsSection", instanceCount: 2 },
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("bounds transitive evidence at high-fan-out coordinator methods", async () => {
+    const root = await mkdtemp(join(tmpdir(), "wf2react-bounded-evidence-"));
+    try {
+      await writeFile(join(root, "F.Designer.cs"), `partial class F {
+        private System.Windows.Forms.Button buttonRun;
+        private void InitializeComponent() {
+          this.buttonRun = new System.Windows.Forms.Button();
+          this.buttonRun.Click += new System.EventHandler(this.buttonRun_Click);
+          this.Controls.Add(this.buttonRun);
+        }
+      }`, "utf8");
+      await writeFile(join(root, "F.cs"), `partial class F : System.Windows.Forms.Form {
+        private void buttonRun_Click(object sender, System.EventArgs e) { Coordinate(); }
+        private void Coordinate() { StepA(); StepB(); StepC(); StepD(); StepE(); }
+        private void StepA() { ServiceA.Save(); }
+        private void StepB() { ServiceB.Save(); }
+        private void StepC() { ServiceC.Save(); }
+        private void StepD() { ServiceD.Save(); }
+        private void StepE() { ServiceE.Save(); }
+      }`, "utf8");
+
+      const result = await convertDesignerSources(root);
+      const hint = result.forms[0].support.contractPoints[0];
+      expect(hint.transitiveCalledSymbols).toEqual(["StepA", "StepB", "StepC", "StepD", "StepE"]);
+      expect(hint.transitiveCalledSymbols).not.toContain("ServiceA.Save");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -745,6 +987,3 @@ describe("consolidated integration fixture", () => {
     expect((mainForm?.navigations ?? []).some((n) => n.target === "EditorForm")).toBe(true);
   });
 });
-
-
-

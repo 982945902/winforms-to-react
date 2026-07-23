@@ -1,0 +1,129 @@
+{
+  "$schema": "./schema.json",
+  "schemaVersion": 1,
+  "id": "opendental-advertising-patient-list-batchability-v1",
+  "page": "FormAdvertisingPatientList",
+  "backend": { "baseUrl": "http://127.0.0.1:5199" },
+  "operations": [
+    {
+      "operationId": "loadAdvertisingPatients",
+      "handler": "FormMassPostcardList_Load",
+      "trigger": { "controlName": "FormAdvertisingPatientList", "event": "Load" },
+      "execution": "server",
+      "intent": "Load reusable filter options and initial patient rows without embedding source-specific queries in the generated page.",
+      "capabilities": ["data", "ui"],
+      "transport": { "method": "GET", "path": "/api/batchability/advertising" },
+      "response": {
+        "bindings": [
+          { "source": "billingTypes", "targetControl": "listBoxPatientBillingType", "target": "options", "labelField": "label", "valueField": "value" },
+          { "source": "patientStatuses", "targetControl": "listBoxPatientStatuses", "target": "options", "labelField": "label", "valueField": "value" },
+          { "source": "contactMethods", "targetControl": "listBoxContactMethods", "target": "options", "labelField": "label", "valueField": "value" },
+          { "source": "defaults.ageFrom", "targetControl": "textPatientAgeFrom", "target": "value" },
+          { "source": "defaults.ageTo", "targetControl": "textPatientAgeTo", "target": "value" },
+          { "source": "defaults.hideNotSeenSince", "targetControl": "checkHidePatientsNotSeenSince", "target": "value" },
+          { "source": "defaults.hideSeenSince", "targetControl": "checkHidePatientsSeenSince", "target": "value" },
+          { "source": "defaults.hideFutureAppointments", "targetControl": "checkHiddenFutureAppt", "target": "value" },
+          {
+            "source": "items",
+            "targetControl": "gridMain",
+            "target": "rows",
+            "rowIdField": "patientNumber",
+            "columnFields": {
+              "gridMainRuntimeColumn1": "$selected",
+              "gridMainRuntimeColumn2": "name",
+              "gridMainRuntimeColumn3": "birthdate",
+              "gridMainRuntimeColumn4": "email",
+              "gridMainRuntimeColumn5": "address",
+              "gridMainRuntimeColumn6": "address2",
+              "gridMainRuntimeColumn7": "city",
+              "gridMainRuntimeColumn8": "state",
+              "gridMainRuntimeColumn9": "zip",
+              "gridMainRuntimeColumn10": "contactMethod",
+              "gridMainRuntimeColumn11": "status",
+              "gridMainRuntimeColumn12": "lastAppointment",
+              "gridMainRuntimeColumn13": "nextAppointment"
+            }
+          },
+          { "source": "status", "target": "status" }
+        ]
+      }
+    },
+    {
+      "operationId": "refreshAdvertisingPatients",
+      "handler": "butRefreshPatientFilters_Click",
+      "trigger": { "controlName": "butRefreshPatientFilters", "event": "Click" },
+      "execution": "server",
+      "intent": "Search patients using the visible age and exclusion filters.",
+      "capabilities": ["data", "validation", "ui"],
+      "transport": { "method": "POST", "path": "/api/batchability/advertising/search" },
+      "request": {
+        "fields": [
+          { "name": "ageFrom", "sourceControl": "textPatientAgeFrom", "source": "value", "parse": "integer" },
+          { "name": "ageTo", "sourceControl": "textPatientAgeTo", "source": "value", "parse": "integer" },
+          { "name": "hideNotSeenSince", "sourceControl": "checkHidePatientsNotSeenSince", "source": "checked", "parse": "boolean" },
+          { "name": "hideSeenSince", "sourceControl": "checkHidePatientsSeenSince", "source": "checked", "parse": "boolean" },
+          { "name": "hideFutureAppointments", "sourceControl": "checkHiddenFutureAppt", "source": "checked", "parse": "boolean" }
+        ]
+      },
+      "response": {
+        "bindings": [
+          {
+            "source": "items",
+            "targetControl": "gridMain",
+            "target": "rows",
+            "rowIdField": "patientNumber",
+            "columnFields": {
+              "gridMainRuntimeColumn1": "$selected",
+              "gridMainRuntimeColumn2": "name",
+              "gridMainRuntimeColumn3": "birthdate",
+              "gridMainRuntimeColumn4": "email",
+              "gridMainRuntimeColumn5": "address",
+              "gridMainRuntimeColumn6": "address2",
+              "gridMainRuntimeColumn7": "city",
+              "gridMainRuntimeColumn8": "state",
+              "gridMainRuntimeColumn9": "zip",
+              "gridMainRuntimeColumn10": "contactMethod",
+              "gridMainRuntimeColumn11": "status",
+              "gridMainRuntimeColumn12": "lastAppointment",
+              "gridMainRuntimeColumn13": "nextAppointment"
+            }
+          },
+          { "source": "status", "target": "status" }
+        ]
+      }
+    },
+    {
+      "operationId": "selectAllAdvertisingPatients",
+      "handler": "butSelectAll_Click",
+      "trigger": { "controlName": "butSelectAll", "event": "Click" },
+      "execution": "client",
+      "intent": "Select all currently visible patients without a server round trip.",
+      "capabilities": ["ui"],
+      "effect": { "kind": "select-all", "targetControl": "gridMain" }
+    },
+    {
+      "operationId": "clearAllAdvertisingPatients",
+      "handler": "butClearAll_Click",
+      "trigger": { "controlName": "butClearAll", "event": "Click" },
+      "execution": "client",
+      "intent": "Clear the current patient selection without a server round trip.",
+      "capabilities": ["ui"],
+      "effect": { "kind": "clear-all", "targetControl": "gridMain" }
+    },
+    {
+      "operationId": "commitAdvertisingPatients",
+      "handler": "butOK_Click",
+      "trigger": { "controlName": "butCommitList", "event": "Click" },
+      "execution": "server",
+      "intent": "Return the selected patient numbers through an explicit server boundary.",
+      "capabilities": ["data", "validation", "ui"],
+      "transport": { "method": "POST", "path": "/api/batchability/advertising/commit" },
+      "request": {
+        "fields": [
+          { "name": "patientNumbers", "sourceControl": "gridMain", "source": "selected-rows", "parse": "integer-array" }
+        ]
+      },
+      "response": { "bindings": [{ "source": "message", "target": "status" }] }
+    }
+  ]
+}

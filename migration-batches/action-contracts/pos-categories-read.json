@@ -1,0 +1,47 @@
+{
+  "$schema": "./schema.json",
+  "schemaVersion": 1,
+  "id": "pos-categories-read-v1",
+  "page": "Catagories",
+  "backend": {
+    "baseUrl": "http://127.0.0.1:5197",
+    "openApiPath": "/openapi/v1.json"
+  },
+  "operations": [
+    {
+      "operationId": "loadCategories",
+      "handler": "Catagories_Load",
+      "trigger": { "controlName": "Catagories", "event": "Load" },
+      "execution": "server",
+      "intent": "Load category rows from the server-owned repository boundary.",
+      "capabilities": ["data", "ui"],
+      "transport": { "method": "GET", "path": "/api/pos/categories" },
+      "response": {
+        "bindings": [
+          { "source": "rows", "targetControl": "dgvcatagories", "target": "rows", "rowIdField": "id" },
+          { "source": "message", "target": "status" }
+        ]
+      }
+    },
+    {
+      "operationId": "searchCategories",
+      "handler": "txtsearch_TextChanged",
+      "trigger": { "controlName": "txtsearch", "event": "TextChanged" },
+      "execution": "server",
+      "intent": "Search category rows by the current text while keeping SQL Server access behind the API.",
+      "capabilities": ["data", "validation", "ui"],
+      "transport": { "method": "POST", "path": "/api/pos/categories/search" },
+      "request": {
+        "fields": [
+          { "name": "keyword", "sourceControl": "txtsearch", "source": "value", "parse": "string" }
+        ]
+      },
+      "response": {
+        "bindings": [
+          { "source": "rows", "targetControl": "dgvcatagories", "target": "rows", "rowIdField": "id" },
+          { "source": "message", "target": "status" }
+        ]
+      }
+    }
+  ]
+}

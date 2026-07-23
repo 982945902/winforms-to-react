@@ -64,9 +64,14 @@ notification states.
 
 The important implementation boundary is type-level adaptation. `RepoObjectsTree`, `RevisionGridControl`,
 `CommitInfo`, `RevisionDiffControl`, `RevisionGpgInfoControl`, `InteractiveGitActionControl`, `FilterToolBar`, and
-`MenuStripEx` are each mapped once in the shared target runtime. Every occurrence in every migrated page references
-that adapter; the exporter does not emit per-file copies. The same adapters and semantic layout are emitted to both
-Refine and NocoBase.
+`MenuStripEx` are each mapped once by the FormBrowse visual profile to a generic runtime adapter. Every occurrence in
+every migrated page references that adapter; the exporter does not emit per-file copies. The same adapters and semantic
+layout are emitted to both Refine and NocoBase.
+
+Project preview records, control-name text/glyph mappings, menu/toolbar fixtures, and fidelity splitter overrides live
+in the FormBrowse visual profile fixture. The shared `MigrationSurface.tsx` consumes only generic capabilities and is
+byte-identical across FormBrowse, FormPatientEdit, and UploadersConfigForm; source asset URLs are emitted in a separate
+`visualAssets.ts` registry. A boundary test prevents project tokens from leaking back into the shared runtime.
 
 The second fidelity pass also recovers WinForms-specific details that a generic flex conversion missed: a missing main
 splitter distance is inferred from the first panel's child width (190/923 rather than a 50/50 fallback), explicitly
@@ -306,10 +311,25 @@ observable in `FormPatientEdit`: `textZip` remains above its intentionally tucke
 empty combo covering the editable field.
 
 Code-behind `if/else` branches that hide opposing sets of controls are retained as neutral runtime visibility groups.
-The OpenDental gate yields exactly one group: `_isUsingNewRaceFeature` defaults to the modern read-only race/ethnicity
-fields and hides the overlapping legacy combos; its alternate branch does the reverse. The intentionally layered Zip
-controls are not classified as a state because they have no opposing visibility assignments. FormBrowse yields no
-visibility groups, providing a cross-project false-positive gate.
+The parser also recognizes conditional `TabPages.Remove(tabPage)` calls, including one-sided conditions: the opposite
+state is the page already declared by the Designer. The OpenDental gate now yields four groups. Three remove the EHR,
+Public Health, and Hospitals tabs in the source-proven minimal default state; `_isUsingNewRaceFeature` defaults to the
+modern read-only race/ethnicity fields and hides the overlapping legacy combos. Fixed-coordinate tabs, semantic tab
+layouts, and tree-backed tab navigation all consume the same visibility state. The intentionally layered Zip controls
+are not classified as a state because they have no opposing visibility assignments. FormBrowse yields no visibility
+groups, providing a cross-project false-positive gate.
+
+The generated preview exposes these groups only when `?wfInspect=1` is present. Its source-state inspector stays
+outside the emulated WinForms window, lists the original condition and `sourceFile:line`, and switches the selected
+variant in memory. The ordinary URL remains clean for parity capture; on macOS the opt-in URL makes runtime UI states
+directly reviewable without launching the C# application.
+
+The inspector also runs a fixed-coordinate geometry audit in the page itself. Non-layout probe wrappers use
+`display: contents`, so they do not change positioning; after layout, the runtime compares each visible control's
+actual DOM bounds with its source bounds and lists differences above ±4px. It checks size and position in the local
+offset-parent coordinate space, flags controls that leave an originally valid parent coordinate space, walks
+overflow-clipping ancestors, and detects newly introduced sibling overlap. Source-authored overlap and source-authored
+out-of-bounds placement are retained rather than reported as migration defects.
 
 Runtime-populated item collections are now explicit neutral IR contracts. The code-behind pass recognizes generic
 `Items.AddEnums<T>()`, `GetEnumDescriptions<T>()`, `GetLocalizedEnumDescriptions<T>()`, `Enum.GetNames(typeof(T))`,
@@ -420,6 +440,16 @@ and UserControl initialization rather than copied into either target. On ShareX 
 hint on the page and `Paste verification code here` once inside the shared `OAuthControl` definition; Refine and
 NocoBase render the same IR field with no ShareX control-name rule.
 
+ToolTip extender properties now follow an equivalent source-proven path. The Designer parser recognizes
+`SetToolTip(control, text)` as a relationship even though WinForms emits it on a nonvisual provider rather than on the
+control itself; direct `ToolTipText`, literals, localized `.resx` values, and reachable code-behind resource strings
+normalize to `VisualAppearance.toolTipText`. Computed permission, query, or entity messages stay as unresolved value
+contracts. The shared runtime uses a portal so clipped panels cannot cut off the native yellow multiline popup, waits
+the WinForms default 500 ms, and keeps the behavior identical in both targets. On ShareX this restores the full
+three-line Amazon S3 custom-domain explanation and the PrivateBin credential hint. OpenDental's three selected-page
+ToolTips remain contracts because their text depends on authorization and referral-query results; no plausible-looking
+message is fabricated.
+
 Localized `ListView` column `Text` and `Width` values are also recovered. ShareX's initial Imgur page therefore shows
 the source `ID`, `Title`, and `Description` header geometry over a genuinely empty white list surface; it no longer
 injects a migration-status sentence into a data control whose runtime records are not available yet.
@@ -516,6 +546,37 @@ resolved icon; no TabPage-name table or ShareX profile was introduced.
 The ShareX Refine output passes TypeScript plus a Vite production build, and its NocoBase client-v2 output passes
 TypeScript. Both preview servers return HTTP 200. Manual screenshot comparison is still required before claiming
 pixel-level parity for this third gate.
+
+The OpenDental Patient batch now distinguishes three independent shared-component states: a Designer-backed
+definition, an explicit type-level target adapter, and an uncovered fallback. `GridOD` is adapted once for eight host
+instances and consumes per-instance neutral columns recovered from code-behind `GridColumn` construction; `MenuOD` is
+adapted once for two instances and consumes statically proven top-level menu items. No form or control instance name is
+embedded in the shared runtime. This raises covered shared-component instances from 11/23 definition-only to 21/23
+definition-or-adapter, while keeping `MonthCalendarOD` and `WarningIntegrity` visible as the two remaining review items.
+
+### Frontend Acceptance Gate v0.4
+
+Refine is now the canonical visual-review surface for the 12-page OpenDental Patient batch. This is a deliberately
+reversible platform decision: NocoBase still receives byte-equivalent `project.ir.json`, target manifest, visual assets,
+profiles, and shared migration runtime, and must continue to compile, but it is not a second manual-review queue.
+
+The target manifest expands every code-behind visibility group into a stable Cartesian state matrix. The current batch
+therefore requires 27 review records: one default state for 11 pages and 16 source-state combinations for
+`FormPatientEdit`. The Refine `/acceptance` dashboard shows missing and blocked evidence, opens the next missing state,
+and declares the C# vertical slice ready only after all pages have complete evidence and none is blocked. Inside
+`wfInspect=1`, the reviewer records pass, accepted non-blocking difference, or blocked; a clean pass is impossible while
+the geometry audit reports an issue, and non-pass decisions require notes. Multi-state pages can save and advance without
+returning to the dashboard after every combination.
+
+Evidence is intentionally independent of a backend at this stage. Records persist in browser local storage and include
+page/state identity, viewport, timestamp, geometry issues grouped by type, decision, and notes. The dashboard exports a
+single JSON artifact for later audit or repository storage and can import that artifact to resume in another browser or
+after regeneration. The `acceptance-gate` CLI validates the artifact against the generated target manifest, merges the
+result with the batch audit's static checks and recommended vertical-slice page, and emits JSON/Markdown readiness
+reports. It rejects duplicate states, incomplete geometry evidence, undocumented non-pass
+decisions, and contradictory clean-pass claims. Missing, blocked, or invalid evidence exits with code 2. Because browser
+automation is outside this gate, the tool reports unreviewed states explicitly rather than manufacturing a visual-pass
+result.
 
 ## Target validation
 

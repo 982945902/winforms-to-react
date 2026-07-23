@@ -10,6 +10,7 @@ const TARGET_PROPERTIES: Record<string, RuntimeValueProperty | "visible"> = {
   PlaceholderText: "placeholderText",
   WatermarkText: "placeholderText",
   CueBannerText: "placeholderText",
+  ToolTipText: "toolTipText",
   SelectedIndex: "selectedIndex",
   SelectedItem: "selectedItem",
   Value: "value",

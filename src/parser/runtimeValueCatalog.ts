@@ -146,6 +146,9 @@ function applyResolvedValue(
     case "placeholderText":
       if (typeof value === "string") control.appearance.placeholderText = value;
       return;
+    case "toolTipText":
+      if (typeof value === "string") control.appearance.toolTipText = value;
+      return;
     case "value":
       if (typeof value === "string" || typeof value === "number") control.appearance.value = value;
       return;

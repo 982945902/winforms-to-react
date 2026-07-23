@@ -222,6 +222,7 @@ export function parseDesignerSource(source: string, options: ParseDesignerOption
   };
 
   applyPropertyAssignments(stripped, controls, columns, form);
+  applyToolTipAssignments(stripped, controls, options.resxData);
   applyEvents(stripped, controls, form, fields);
 
   // Apply resx column headers BEFORE applyColumns copies columns into grid.columns
@@ -740,6 +741,9 @@ function assignControlProperty(control: MutableControl, property: string, value:
     case "CueBannerText":
       control.appearance.placeholderText = String(value ?? "");
       break;
+    case "ToolTipText":
+      control.appearance.toolTipText = String(value ?? "");
+      break;
     case "MaxLength":
       if (typeof value === "number") control.appearance.maxLength = value;
       break;
@@ -810,6 +814,36 @@ function assignControlProperty(control: MutableControl, property: string, value:
     default:
       control.properties[property] = value;
       break;
+  }
+}
+
+// ToolTip is an extender component, so Visual Studio emits a method call
+// (`tip.SetToolTip(control, text)`) rather than a property assignment on the
+// target control. Preserve only literal or localized-resx text here; runtime
+// expressions remain code-behind contracts.
+function applyToolTipAssignments(
+  source: string,
+  controls: Map<string, MutableControl>,
+  resxData?: ResxData,
+): void {
+  const pattern = new RegExp(`(?:this\\.)?${ID}\\s*\\.\\s*SetToolTip\\s*\\(\\s*(?:this\\.)?(${ID})\\s*,\\s*(${VALUE})\\);`, "g");
+  for (const match of source.matchAll(pattern)) {
+    const control = controls.get(match[1]);
+    if (!control) continue;
+    const expression = match[2].trim();
+    const resource = expression.match(/resources\s*\.\s*GetString\s*\(\s*"([^"]+)"\s*\)/i)?.[1];
+    if (resource && resxData) {
+      const dot = resource.indexOf(".");
+      if (dot > 0) {
+        const value = resxData.get(resource.slice(0, dot))?.get(resource.slice(dot + 1));
+        if (value !== undefined) control.appearance.toolTipText = value;
+      }
+      continue;
+    }
+    if (/^@?"/.test(expression)) {
+      const value = parseValue(expression);
+      if (typeof value === "string") control.appearance.toolTipText = value;
+    }
   }
 }
 
@@ -1491,6 +1525,9 @@ function applyResxToControls(controls: Map<string, MutableControl>, form: Visual
     }
     if (props.placeholderText != null && control.appearance.placeholderText == null) {
       control.appearance.placeholderText = props.placeholderText;
+    }
+    if (props.toolTipText != null && control.appearance.toolTipText == null) {
+      control.appearance.toolTipText = props.toolTipText;
     }
     if (props.scrollBars && control.appearance.scrollBars == null) {
       control.appearance.scrollBars = props.scrollBars;

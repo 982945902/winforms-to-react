@@ -1,0 +1,99 @@
+openapi: 3.1.0
+info:
+  title: Legacy CCD bridge contract
+  version: 1.0.0
+paths:
+  /api/ccd/capabilities:
+    get:
+      operationId: getCcdCapabilities
+      responses:
+        "200":
+          description: Contract version and implemented operations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapabilityEnvelope"
+  /api/ccd/settings-validation:
+    get:
+      operationId: validateCcdSettings
+      responses:
+        "200":
+          description: Global CCD configuration errors
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationEnvelope"
+  /api/ccd/patients/{patientNumber}/validation:
+    get:
+      operationId: validateCcdPatient
+      parameters:
+        - name: patientNumber
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: Patient validation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PatientValidationResult"
+  /api/ccd/patients/{patientNumber}/exports:
+    post:
+      operationId: generatePatientCcd
+      parameters:
+        - name: patientNumber
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: Generated CCD document
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CcdDocument"
+  /api/ccd/resources/CCD:
+    get:
+      operationId: getCcdStylesheet
+      responses:
+        "200":
+          description: CCD.xsl content
+          content:
+            text/plain:
+              schema: { type: string }
+components:
+  schemas:
+    CapabilityEnvelope:
+      type: object
+      required: [schemaVersion, service, operations]
+      properties:
+        schemaVersion: { const: 1 }
+        service: { type: string }
+        operations:
+          type: array
+          items:
+            enum: [settings-validation, patient-validation, patient-export, ccd-stylesheet]
+    ValidationEnvelope:
+      type: object
+      required: [errors]
+      properties:
+        errors:
+          type: array
+          items: { type: string }
+    PatientValidationResult:
+      type: object
+      required: [patientNumber, displayName, errors]
+      properties:
+        patientNumber: { type: integer, format: int64 }
+        displayName: { type: string }
+        errors: { type: array, items: { type: string } }
+    CcdDocument:
+      type: object
+      required: [patientNumber, firstName, lastName, xml, warnings]
+      properties:
+        patientNumber: { type: integer, format: int64 }
+        firstName: { type: string }
+        lastName: { type: string }
+        xml: { type: string }
+        warnings: { type: array, items: { type: string } }

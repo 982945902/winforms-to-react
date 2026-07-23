@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>OpenDental.EhrPatientExport.ContractTests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/OpenDental.EhrPatientExport.Core/OpenDental.EhrPatientExport.Core.csproj" />
+    <ProjectReference Include="../../src/OpenDental.EhrPatientExport.Api/OpenDental.EhrPatientExport.Api.csproj" />
+  </ItemGroup>
+</Project>

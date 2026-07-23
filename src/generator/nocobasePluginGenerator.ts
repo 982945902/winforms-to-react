@@ -2,12 +2,16 @@ import { copyFile, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ProjectIR } from "../ir/types.js";
 import { buildTargetManifest } from "../ir/targetManifest.js";
+import { buildActionContractCandidateReport } from "../actionContractCandidates.js";
+import { buildActionContractDraftBundle } from "../actionContractDrafts.js";
+import { buildActionContractPromotionBundle } from "../actionContractPromotions.js";
 import {
   componentRegistryTsx,
   migrationStylesCss,
   migrationSurfaceTsx,
+  migrationVisualAssetsTs,
 } from "./migrationTargetRuntime.js";
-import { migrationVisualProfilesTsx, migrationVisualProfileStylesCss } from "./migrationVisualProfiles.js";
+import { migrationComponentAdapters, migrationVisualProfilesTsx, migrationVisualProfileStylesCss } from "./migrationVisualProfiles.js";
 
 export async function generateNocoBasePlugin(input: { outDir: string; project: ProjectIR }): Promise<void> {
   const client = join(input.outDir, "src", "client-v2");
@@ -19,17 +23,24 @@ export async function generateNocoBasePlugin(input: { outDir: string; project: P
   await Promise.all([
     mkdir(generated, { recursive: true }), mkdir(runtime, { recursive: true }), mkdir(pages, { recursive: true }), mkdir(assets, { recursive: true }),
   ]);
-  const manifest = buildTargetManifest(input.project);
+  const manifest = buildTargetManifest(input.project, { componentAdapters: migrationComponentAdapters(input.project) });
+  const candidates = buildActionContractCandidateReport(input.project);
+  const drafts = buildActionContractDraftBundle(input.project);
+  const promotions = buildActionContractPromotionBundle(input.project);
 
   await Promise.all([
     writeJson(join(generated, "project.ir.json"), input.project),
     writeJson(join(generated, "target-manifest.json"), manifest),
+    writeJson(join(generated, "action-contract.candidates.json"), candidates),
+    writeJson(join(generated, "action-contract.drafts.json"), drafts),
+    writeJson(join(generated, "action-contract.promotions.json"), promotions),
     writeFile(join(input.outDir, "package.json"), packageJson(), "utf8"),
     writeFile(join(input.outDir, "tsconfig.json"), tsconfigJson(), "utf8"),
     writeFile(join(client, "index.tsx"), `export { default } from "./plugin";\n`, "utf8"),
     writeFile(join(client, "plugin.tsx"), pluginTsx(manifest.pages[0]?.id), "utf8"),
     writeFile(join(pages, "MigrationPage.tsx"), pageTsx(), "utf8"),
     writeFile(join(runtime, "MigrationSurface.tsx"), migrationSurfaceTsx(input.project), "utf8"),
+    writeFile(join(runtime, "visualAssets.ts"), migrationVisualAssetsTs(input.project), "utf8"),
     writeFile(join(runtime, "componentRegistry.tsx"), componentRegistryTsx(input.project), "utf8"),
     writeFile(join(runtime, "visualProfiles.tsx"), migrationVisualProfilesTsx(input.project), "utf8"),
     writeFile(join(client, "styles.css"), `${migrationStylesCss()}${migrationVisualProfileStylesCss(input.project)}`, "utf8"),
@@ -51,7 +62,7 @@ function packageJson(): string {
     displayName: "WinForms migration spike",
     version: "0.0.0",
     main: "dist/server/index.js",
-    scripts: { typecheck: "tsc --noEmit" },
+    scripts: { build: "tsc --noEmit", typecheck: "tsc --noEmit" },
     peerDependencies: {
       "@nocobase/client-v2": "2.x",
       "@nocobase/flow-engine": "2.x",
@@ -144,6 +155,7 @@ Copy it into a NocoBase workspace plugin created with
 \`yarn pm create @my-project/plugin-wf2-migration-spike\`, then enable it and open
 \`/v/migration/<page-id>\`. FlowModel/collection generation should be added only after data semantics are known.
 
-For an isolated API compatibility check, run \`npm install && npm run typecheck\` in this directory.
+For an isolated source-package build gate, run \`npm install && npm run build\` in this directory. This checks the
+client-v2 API and TypeScript surface; the host NocoBase workspace owns final plugin bundling.
 `;
 }

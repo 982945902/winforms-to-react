@@ -21,6 +21,7 @@ export type TargetTable = {
 
 export type TargetPage = {
   id: string;
+  pageName: string;
   title: string;
   route: string;
   sourcePath: string;
@@ -29,6 +30,7 @@ export type TargetPage = {
   tables: TargetTable[];
   componentRefs: string[];
   contractCount: number;
+  acceptanceVariants: Array<{ key: string; labels: string[] }>;
 };
 
 export type TargetManifest = {
@@ -36,6 +38,8 @@ export type TargetManifest = {
   sharedComponents: Array<{
     id: string;
     status: "resolved" | "external";
+    renderStatus: "definition" | "adapter" | "fallback";
+    adapter?: string;
     instanceCount: number;
     fields: TargetField[];
     actions: TargetAction[];
@@ -51,6 +55,16 @@ export type TargetManifest = {
     contracts: number;
     sharedComponentTypes: number;
     sharedComponentInstances: number;
+    resolvedSharedComponentTypes: number;
+    externalSharedComponentTypes: number;
+    resolvedSharedComponentInstances: number;
+    externalSharedComponentInstances: number;
+    definedSharedComponentTypes: number;
+    adaptedSharedComponentTypes: number;
+    fallbackSharedComponentTypes: number;
+    definedSharedComponentInstances: number;
+    adaptedSharedComponentInstances: number;
+    fallbackSharedComponentInstances: number;
     sharedComponentFields: number;
     sharedComponentActions: number;
     sharedComponentTables: number;
@@ -67,12 +81,13 @@ const ACTION_KINDS = new Set([
   "ToolStripSplitButton", "ToolStripMenuItem",
 ]);
 
-export function buildTargetManifest(project: ProjectIR): TargetManifest {
+export function buildTargetManifest(project: ProjectIR, options: { componentAdapters?: Readonly<Record<string, string>> } = {}): TargetManifest {
   const pages = project.pages.map((page) => {
-    const { fields, actions, tables, componentRefs } = analyzeControls(page.controls);
+    const { fields, actions, tables, componentRefs } = analyzeControls(page.controls, options.componentAdapters);
 
     return {
       id: safeId(page.name),
+      pageName: page.name,
       title: page.text ?? page.name,
       route: `/migration/${safeId(page.name)}`,
       sourcePath: page.sourcePath,
@@ -81,14 +96,18 @@ export function buildTargetManifest(project: ProjectIR): TargetManifest {
       tables,
       componentRefs,
       contractCount: page.support.contractPoints.length,
+      acceptanceVariants: buildAcceptanceVariants(page.runtimeVisibilityGroups || []),
     };
   });
 
   const sharedComponents = project.components.map((component) => ({
     id: component.id,
     status: component.status,
+    renderStatus: component.status === "resolved" ? "definition" as const
+      : options.componentAdapters?.[component.id] ? "adapter" as const : "fallback" as const,
+    ...(options.componentAdapters?.[component.id] ? { adapter: options.componentAdapters[component.id] } : {}),
     instanceCount: component.instanceCount,
-    ...analyzeControls(component.controls),
+    ...analyzeControls(component.controls, options.componentAdapters),
     contractCount: component.support?.contractPoints.length ?? 0,
   }));
 
@@ -103,6 +122,16 @@ export function buildTargetManifest(project: ProjectIR): TargetManifest {
       contracts: sum(pages, (page) => page.contractCount),
       sharedComponentTypes: project.components.length,
       sharedComponentInstances: sum(project.components, (component) => component.instanceCount),
+      resolvedSharedComponentTypes: project.components.filter((component) => component.status === "resolved").length,
+      externalSharedComponentTypes: project.components.filter((component) => component.status === "external").length,
+      resolvedSharedComponentInstances: sum(project.components.filter((component) => component.status === "resolved"), (component) => component.instanceCount),
+      externalSharedComponentInstances: sum(project.components.filter((component) => component.status === "external"), (component) => component.instanceCount),
+      definedSharedComponentTypes: sharedComponents.filter((component) => component.renderStatus === "definition").length,
+      adaptedSharedComponentTypes: sharedComponents.filter((component) => component.renderStatus === "adapter").length,
+      fallbackSharedComponentTypes: sharedComponents.filter((component) => component.renderStatus === "fallback").length,
+      definedSharedComponentInstances: sum(sharedComponents.filter((component) => component.renderStatus === "definition"), (component) => component.instanceCount),
+      adaptedSharedComponentInstances: sum(sharedComponents.filter((component) => component.renderStatus === "adapter"), (component) => component.instanceCount),
+      fallbackSharedComponentInstances: sum(sharedComponents.filter((component) => component.renderStatus === "fallback"), (component) => component.instanceCount),
       sharedComponentFields: sum(sharedComponents, (component) => component.fields.length),
       sharedComponentActions: sum(sharedComponents, (component) => component.actions.length),
       sharedComponentTables: sum(sharedComponents, (component) => component.tables.length),
@@ -111,7 +140,16 @@ export function buildTargetManifest(project: ProjectIR): TargetManifest {
   };
 }
 
-function analyzeControls(root: VisualControl[]): {
+function buildAcceptanceVariants(groups: NonNullable<ProjectIR["pages"][number]["runtimeVisibilityGroups"]>): Array<{ key: string; labels: string[] }> {
+  if (groups.length === 0) return [{ key: "default", labels: [] }];
+  return groups.reduce<Array<{ key: string; labels: string[] }>>((states, group) => states.flatMap((state) =>
+    (group.variants || []).map((variant, index) => ({
+      key: state.key ? `${state.key}-${index}` : String(index),
+      labels: [...state.labels, variant.label || `variant ${index + 1}`],
+    }))), [{ key: "", labels: [] }]);
+}
+
+function analyzeControls(root: VisualControl[], componentAdapters: Readonly<Record<string, string>> = {}): {
   fields: TargetField[];
   actions: TargetAction[];
   tables: TargetTable[];
@@ -144,7 +182,8 @@ function analyzeControls(root: VisualControl[]): {
     }));
   });
   const tables = controls
-    .filter((control) => control.kind === "DataGridView" || control.kind === "ListView")
+    .filter((control) => control.kind === "DataGridView" || control.kind === "ListView"
+      || Boolean(control.componentRef && componentAdapters[control.componentRef] === "data-grid"))
     .map((control) => ({
       name: control.name,
       columns: (control.columns ?? []).map((column) => ({

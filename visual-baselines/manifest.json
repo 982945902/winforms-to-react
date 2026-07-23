@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "nativeDirectory": "native",
+  "capture": {
+    "dpi": 96,
+    "displayScalePercent": 100,
+    "browserZoomPercent": 100,
+    "theme": "Windows light"
+  },
+  "criteria": {
+    "minimumGeometryCoverage": 0.95,
+    "geometryEdgeTolerancePx": 4,
+    "pixelChannelThreshold": 16
+  },
+  "targets": [
+    {
+      "id": "refine",
+      "label": "Refine / React",
+      "webDirectory": "web/refine",
+      "reviewDirectory": "reviews/refine"
+    },
+    {
+      "id": "nocobase",
+      "label": "NocoBase client-v2",
+      "webDirectory": "web/nocobase",
+      "reviewDirectory": "reviews/nocobase"
+    }
+  ],
+  "views": [
+    {
+      "id": "sharex-imgur",
+      "project": "ShareX",
+      "page": "UploadersConfigForm",
+      "state": "Image uploaders / Imgur",
+      "captureInstructions": "Select Image uploaders, then Imgur. Keep all values at their initial source state and close every ToolTip.",
+      "clientSize": { "width": 1044, "height": 601 }
+    },
+    {
+      "id": "sharex-privatebin",
+      "project": "ShareX",
+      "page": "UploadersConfigForm",
+      "state": "Text uploaders / PrivateBin / credentials ToolTip visible",
+      "captureInstructions": "Select Text uploaders, then PrivateBin. Hover the credentials help target until its multiline ToolTip is fully visible.",
+      "clientSize": { "width": 1044, "height": 601 }
+    },
+    {
+      "id": "sharex-ftp",
+      "project": "ShareX",
+      "page": "UploadersConfigForm",
+      "state": "File uploaders / FTP, FTPS, SFTP",
+      "captureInstructions": "Select File uploaders, then FTP / FTPS / SFTP. Use the initially selected account and do not focus a text field.",
+      "clientSize": { "width": 1044, "height": 601 }
+    },
+    {
+      "id": "sharex-amazon-s3",
+      "project": "ShareX",
+      "page": "UploadersConfigForm",
+      "state": "File uploaders / Amazon S3 / custom-domain ToolTip visible",
+      "captureInstructions": "Select File uploaders, then Amazon S3. Hover the custom-domain help target until its multiline ToolTip is fully visible.",
+      "clientSize": { "width": 1044, "height": 601 }
+    },
+    {
+      "id": "sharex-google-cloud",
+      "project": "ShareX",
+      "page": "UploadersConfigForm",
+      "state": "File uploaders / Google Cloud Storage",
+      "captureInstructions": "Select File uploaders, then Google Cloud Storage. Keep all fields at their initial source state and close every ToolTip.",
+      "clientSize": { "width": 1044, "height": 601 }
+    },
+    {
+      "id": "sharex-bitly",
+      "project": "ShareX",
+      "page": "UploadersConfigForm",
+      "state": "URL shorteners / bit.ly",
+      "captureInstructions": "Select URL shorteners, then bit.ly. Keep the navigation selection visible and do not focus a text field.",
+      "clientSize": { "width": 1044, "height": 601 }
+    },
+    {
+      "id": "gitextensions-formbrowse",
+      "project": "GitExtensions",
+      "page": "FormBrowse",
+      "state": "Default workspace",
+      "captureInstructions": "Open the pinned source revision and repository, then capture the initial workspace before changing revision, tab, splitter or tree selection.",
+      "clientSize": { "width": 923, "height": 573 }
+    },
+    {
+      "id": "opendental-patient",
+      "project": "OpenDental",
+      "page": "FormPatientEdit",
+      "state": "Default patient editor",
+      "captureInstructions": "Open a patient editor with the pinned fixture data and capture the initial tab, enabled state and source client size.",
+      "clientSize": { "width": 974, "height": 696 }
+    }
+  ]
+}

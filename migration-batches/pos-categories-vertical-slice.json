@@ -1,0 +1,15 @@
+{
+  "$schema": "./schema.json",
+  "id": "pos-categories-vertical-slice",
+  "description": "A read/search vertical slice for the POS category page, including runtime-generated DataGridView columns.",
+  "source": {
+    "repository": "https://github.com/bilalmehrban/Point-of-Sale-Desktop-Csharp-.git",
+    "revision": "ddf9e7b812abfc0d2b30ab860a8c8854139203b9"
+  },
+  "actionContracts": [
+    "action-contracts/pos-categories-read.json"
+  ],
+  "files": [
+    "POS/UI/Catagories.Designer.cs"
+  ]
+}

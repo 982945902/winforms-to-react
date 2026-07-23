@@ -11,11 +11,19 @@
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check": "npm run build && npm test"
+    "check": "npm run build && npm test",
+    "check:vertical-slice": "sh vertical-slices/opendental-ehr-patient-export/verify.sh",
+    "check:pos-vertical-slice": "sh vertical-slices/pos-categories-read/verify.sh",
+    "gate:real-adapters": "sh vertical-slices/opendental-ehr-patient-export/gate-real-adapters.sh",
+    "dev:action-fixtures": "node fixtures/action-api/server.mjs",
+    "visual:gate": "npm run build --silent && node dist/cli.js visual-gate visual-baselines/manifest.json"
   },
-  "dependencies": {},
+  "dependencies": {
+    "pngjs": "^7.0.0"
+  },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@types/pngjs": "^6.0.5",
     "typescript": "^5.8.3",
     "vitest": "^3.2.4"
   }

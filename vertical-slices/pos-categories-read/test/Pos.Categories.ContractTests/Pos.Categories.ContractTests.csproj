@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Pos.Categories.ContractTests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Pos.Categories.Core/Pos.Categories.Core.csproj" />
+    <ProjectReference Include="../../src/Pos.Categories.Api/Pos.Categories.Api.csproj" />
+  </ItemGroup>
+</Project>

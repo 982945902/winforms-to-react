@@ -229,6 +229,11 @@ class ComponentInitializer {
         normalized = String(value);
         control.appearance.placeholderText = normalized;
         break;
+      case "toolTipText":
+        if (value === null || isVisualColor(value)) return;
+        normalized = String(value);
+        control.appearance.toolTipText = normalized;
+        break;
       case "checked":
       case "enabled":
       case "readOnly":
@@ -448,6 +453,7 @@ function targetProperty(value: string): ComponentInitializationDefault["targetPr
     PlaceholderText: "placeholderText",
     WatermarkText: "placeholderText",
     CueBannerText: "placeholderText",
+    ToolTipText: "toolTipText",
     SelectedIndex: "selectedIndex",
     SelectedItem: "selectedItem",
     Value: "value",

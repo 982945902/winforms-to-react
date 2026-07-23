@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wf2react.local/schemas/visual-manual-review-v1.json",
+  "title": "WinForms to React visual manual review",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "reviewer",
+    "reviewedAt",
+    "textAndIconsExact",
+    "geometryCoverage",
+    "clientAreaExact",
+    "noLayoutDefects",
+    "stateMatches"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "reviewer": { "type": "string", "minLength": 1 },
+    "reviewedAt": { "type": "string", "format": "date-time" },
+    "textAndIconsExact": { "type": "boolean" },
+    "geometryCoverage": { "type": "number", "minimum": 0, "maximum": 1 },
+    "clientAreaExact": { "type": "boolean" },
+    "noLayoutDefects": { "type": "boolean" },
+    "stateMatches": { "type": "boolean" },
+    "notes": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

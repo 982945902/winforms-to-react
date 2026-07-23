@@ -11,22 +11,38 @@ import type {
   RuntimeTabNavigator,
   RuntimeValueSource,
   RuntimeVisibilityGroup,
+  VisualColumn,
   VisualControl,
   VisualForm,
 } from "../ir/types.js";
 import { stripComments } from "./designerParser.js";
 
 export type CodeMethodInfo = {
+  ownerType?: string;
   name: string;
   sourceFile: string;
   lineStart: number;
   lineEnd: number;
   calledSymbols: string[];
+  propertyReads: string[];
+  assignedSymbols: string[];
+  constructedTypes: string[];
+  awaitedCalls: string[];
+  valueWrites: NonNullable<MigrationHint["valueWrites"]>;
   bodyStart: number;
   bodyEnd: number;
 };
 
+export type CodeFieldInfo = {
+  ownerType: string;
+  name: string;
+  typeName: string;
+  sourceFile: string;
+  line: number;
+};
+
 export type CodeBehindInfo = {
+  fields: CodeFieldInfo[];
   methods: CodeMethodInfo[];
   handlers: MigrationHint[];
   navigations: NavEdge[];
@@ -39,6 +55,8 @@ export type CodeBehindInfo = {
   appearanceHints: Array<{ controlName: string; property: "image" | "imageKey"; value: string }>;
   propertyGridHints: Array<{ controlName: string; source: PropertyGridObjectSource }>;
   valueHints: Array<{ controlName: string; source: RuntimeValueSource }>;
+  gridColumnHints: Array<{ controlName: string; column: VisualColumn }>;
+  menuItemHints: Array<{ controlName: string; text: string; handler?: string }>;
 };
 
 const CS_KEYWORDS = new Set([
@@ -67,8 +85,14 @@ const IDENT = "[A-Za-z_\\u0080-\\uFFFF][\\w\\u0080-\\uFFFF]*";
 const HANDLER_RE = new RegExp(
   `(?:private|protected|public|internal)?\\s*(?:async\\s+)?(?:void|Task)\\s+(${IDENT})\\s*\\(\\s*object\\??\\s+\\w+\\s*,\\s*[A-Za-z_][\\w.]*(?:EventArgs|Args)\\??\\b[^)]*\\)`, "g");
 const METHOD_DECL_RE = /^\s*(?:(?:public|private|protected|internal|static|virtual|override|sealed|async|new|partial|extern|unsafe)\s+)+(?:(?:[A-Za-z_][\w.<>,?\[\]]*)\s+)?([A-Za-z_]\w*)\s*\([^;{}]*\)\s*(?:where\s+[^{]+)?\{/gm;
-// Method invocation inside a body: `Foo(`, `a.b.Foo(`, or generic `Foo<T>(`.
-const CALL_RE = /(?<![.\w])([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*(?:<[^<>()]*>)?\s*\(/g;
+// Method invocation inside a body: `Foo(`, `a.b.Foo(`, `_a?.Foo(`, or generic `Foo<T>(`.
+const CALL_RE = /(?<![.\w])([A-Za-z_]\w*(?:(?:\.|\?\.)[A-Za-z_]\w*)*)\s*(?:<[^<>()]*>)?\s*\(/g;
+const PROPERTY_READ_RE = /(?<![.\w])((?:this\.)?[A-Za-z_]\w*(?:(?:\.|\?\.)[A-Za-z_]\w*)+)\b(?!\s*(?:<[^<>()]*>)?\s*\()/g;
+const ASSIGNED_SYMBOL_RE = /(?<![=!<>.\w])((?:this\.)?[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*(?:\+\+|--|(?:\?\?|<<|>>|[+\-*/%&|^])?=(?!=|>))/g;
+const CONSTRUCTED_TYPE_RE = /\bnew\s+([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)(?:\s*<[^;{}()]+>)?\s*(?=\(|\{|\[)/g;
+const AWAITED_CALL_RE = /\bawait\s+((?:this\.)?[A-Za-z_]\w*(?:(?:\.|\?\.)[A-Za-z_]\w*)*)\s*(?:<[^<>()]*>)?\s*\(/g;
+const TYPE_DECL_RE = /\b(?:class|record|struct)\s+([A-Za-z_]\w*)\b[^{;]*\{/g;
+const FIELD_DECL_RE = /^\s*(?:(?:public|private|protected|internal|static|readonly|volatile|new|const)\s+)*((?:global::)?[A-Za-z_]\w*(?:(?:\.|::)[A-Za-z_]\w*)*(?:\s*<[^;={}()]+>)?(?:\[\])?\??)\s+([A-Za-z_]\w*)\s*(?:=[^;]*)?;/gm;
 // Navigation: `new SomeForm(...).Show()` / `.ShowDialog()` or `x.Show(`/`x.ShowDialog(`.
 const NEW_SHOW_RE = /new\s+([A-Z]\w*)\s*\([^;]*?\)\s*\.\s*(Show|ShowDialog)\s*\(/g;
 const VAR_SHOW_RE = /([A-Za-z_]\w*)\s*\.\s*(Show|ShowDialog)\s*\(/g;
@@ -99,6 +123,7 @@ const NEW_TABPAGE_RE = /(?:this\.)?([A-Za-z_]\w*)\s*=\s*new\s+TabPage\b/g;
 const ADD_TABPAGE_RE = /(?:this\.)?([A-Za-z_]\w*)\s*\.\s*(?:Controls|TabPages)\s*\.\s*Add\s*\(\s*(?:this\.)?([A-Za-z_]\w*)\s*\)/g;
 const TAB_NAVIGATOR_RE = /(?:this\.)?([A-Za-z_]\w*)\s*\.\s*([A-Za-z_]\w*TabControl)\s*=\s*(?:this\.)?([A-Za-z_]\w*)\s*;/g;
 const VISIBLE_ASSIGN_RE = /(?:this\.)?([A-Za-z_]\w*)\s*\.\s*Visible\s*=\s*(true|false)\s*;/g;
+const TABPAGE_REMOVE_RE = /(?:this\.)?([A-Za-z_]\w*)\s*\.\s*TabPages\s*\.\s*Remove\s*\(\s*(?:this\.)?([A-Za-z_]\w*)\s*\)\s*;/g;
 const CONTROL_STATE_BINDING_RE = /(?:this\.)?([A-Za-z_]\w*)\s*\.\s*(Enabled|ReadOnly|Visible)\s*=\s*(!\s*)?(?:this\.)?([A-Za-z_]\w*)\s*\.\s*(Checked|Enabled|ReadOnly|Visible)\s*;/g;
 const ADD_ENUM_ITEMS_RE = /(?:this\.)?([A-Za-z_]\w*)\s*\.\s*Items\s*\.\s*AddEnums\s*<\s*([A-Za-z_][\w.]*)\s*>\s*\(/g;
 const ADD_RANGE_ENUM_DESCRIPTIONS_RE = /(?:this\.)?([A-Za-z_]\w*)\s*\.\s*Items\s*\.\s*AddRange\s*\(\s*(?:[A-Za-z_][\w.]*\.)?(Get(?:Localized)?EnumDescriptions)\s*<\s*([A-Za-z_][\w.]*)\s*>\s*\(\s*\)\s*(?:\.\s*ToArray\s*\(\s*\))?\s*\)/g;
@@ -113,8 +138,9 @@ const TYPED_VARIABLE_RE = /\b([A-Z][\w.]*)\s+([A-Za-z_]\w*)\s*=\s*(?!>)/g;
 const FOREACH_VARIABLE_RE = /\bforeach\s*\(\s*([A-Z][\w.]*)\s+([A-Za-z_]\w*)\s+in\b/g;
 const ADD_VARIABLE_LIST_ITEM_RE = /(?:this\.)?([A-Za-z_]\w*)\s*\.\s*Items\s*\.\s*Add\s*\(\s*([A-Za-z_]\w*)\s*\)/g;
 const MEMBER_TYPE_RE = /\b(?:public|private|protected|internal)\s+(?:(?:static|readonly|volatile|new|required)\s+)*([A-Z][\w.]*(?:\s*<[^;{}=]+>)?\??(?:\[\])?)\s+([A-Za-z_]\w*)\s*(?=\{|=|;)/g;
-const RUNTIME_VALUE_RE = /(?:this\.)?([A-Za-z_]\w*)\s*\.\s*(Text|Checked|Enabled|ReadOnly|PlaceholderText|WatermarkText|CueBannerText|SelectedIndex|SelectedItem|Value)\s*=\s*([^;]+);/g;
+const RUNTIME_VALUE_RE = /(?:this\.)?([A-Za-z_]\w*)\s*\.\s*(Text|Checked|Enabled|ReadOnly|PlaceholderText|WatermarkText|CueBannerText|ToolTipText|SelectedIndex|SelectedItem|Value)\s*=\s*([^;]+);/g;
 const WATERMARK_CALL_RE = /(?:this\.)?([A-Za-z_]\w*)\s*\.\s*(?:SetWatermark|SetCueBanner|SetPlaceholder(?:Text)?)\s*\(/g;
+const TOOLTIP_CALL_RE = new RegExp(`(?:this\\.)?${IDENT}\\s*\\.\\s*SetToolTip\\s*\\(`, "g");
 
 function lineOf(source: string, index: number): number {
   let line = 1;
@@ -224,6 +250,75 @@ function matchBody(source: string, fromIndex: number): { start: number; end: num
   return null;
 }
 
+type CodeTypeSpan = { name: string; start: number; bodyStart: number; end: number };
+
+function codeTypeSpans(source: string): CodeTypeSpan[] {
+  const spans: CodeTypeSpan[] = [];
+  TYPE_DECL_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = TYPE_DECL_RE.exec(source)) !== null) {
+    const body = matchBody(source, match.index);
+    if (!body) continue;
+    spans.push({ name: match[1], start: match.index, bodyStart: body.start, end: body.end });
+  }
+  return spans;
+}
+
+function ownerSpanAt(spans: CodeTypeSpan[], index: number): CodeTypeSpan | undefined {
+  return spans
+    .filter((span) => index > span.bodyStart && index < span.end)
+    .sort((left, right) => right.bodyStart - left.bodyStart)[0];
+}
+
+function ownerTypeAt(spans: CodeTypeSpan[], index: number): string | undefined {
+  return ownerSpanAt(spans, index)?.name;
+}
+
+function isDirectTypeMember(source: string, span: CodeTypeSpan, index: number): boolean {
+  let depth = 1;
+  for (let cursor = span.bodyStart + 1; cursor < index; cursor += 1) {
+    const character = source[cursor];
+    if (character === '"' || character === "'") {
+      cursor = skipCodeQuoted(source, cursor, character);
+      continue;
+    }
+    if (character === "{") depth += 1;
+    else if (character === "}") depth -= 1;
+  }
+  return depth === 1;
+}
+
+function shortDeclaredType(typeName: string): string {
+  const withoutGlobal = typeName.replace(/^global::/, "").replace(/\?$/, "").replace(/\[\]$/, "").trim();
+  const outer = withoutGlobal.split("<", 1)[0].trim();
+  return outer.split(/\.|::/).pop() ?? outer;
+}
+
+function extractDeclaredFields(
+  source: string,
+  sourceFile: string,
+  spans: CodeTypeSpan[],
+  methods: CodeMethodInfo[],
+): CodeFieldInfo[] {
+  const fields: CodeFieldInfo[] = [];
+  FIELD_DECL_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = FIELD_DECL_RE.exec(source)) !== null) {
+    const ownerSpan = ownerSpanAt(spans, match.index);
+    if (!ownerSpan || !isDirectTypeMember(source, ownerSpan, match.index)) continue;
+    const ownerType = ownerSpan.name;
+    if (methods.some((method) => match!.index > method.bodyStart && match!.index < method.bodyEnd)) continue;
+    fields.push({
+      ownerType,
+      typeName: shortDeclaredType(match[1]),
+      name: match[2],
+      sourceFile,
+      line: lineOf(source, match.index),
+    });
+  }
+  return fields;
+}
+
 function matchingDelimiter(source: string, openIndex: number, open: string, close: string): number {
   let depth = 0;
   for (let i = openIndex; i < source.length; i += 1) {
@@ -246,7 +341,9 @@ function matchingDelimiter(source: string, openIndex: number, open: string, clos
   return -1;
 }
 
-function firstCallArgument(source: string, openParen: number, closeParen: number): string {
+function callArguments(source: string, openParen: number, closeParen: number): string[] {
+  const output: string[] = [];
+  let start = openParen + 1;
   let round = 0;
   let square = 0;
   let curly = 0;
@@ -268,13 +365,19 @@ function firstCallArgument(source: string, openParen: number, closeParen: number
     else if (char === "{") curly += 1;
     else if (char === "}") curly = Math.max(0, curly - 1);
     else if (char === "," && round === 0 && square === 0 && curly === 0) {
-      return source.slice(openParen + 1, index).trim();
+      output.push(source.slice(start, index).trim());
+      start = index + 1;
     }
   }
-  return source.slice(openParen + 1, closeParen).trim();
+  output.push(source.slice(start, closeParen).trim());
+  return output.filter(Boolean);
 }
 
-function visibleAssignments(body: string): { hidden: string[]; shown: string[] } {
+function firstCallArgument(source: string, openParen: number, closeParen: number): string {
+  return callArguments(source, openParen, closeParen)[0] ?? "";
+}
+
+function visibleAssignments(body: string): { hidden: string[]; shown: string[]; removedTabs: string[] } {
   const hidden = new Set<string>();
   const shown = new Set<string>();
   VISIBLE_ASSIGN_RE.lastIndex = 0;
@@ -285,7 +388,14 @@ function visibleAssignments(body: string): { hidden: string[]; shown: string[] }
     target.add(match[1]);
     opposite.delete(match[1]);
   }
-  return { hidden: [...hidden], shown: [...shown] };
+  const removedTabs = new Set<string>();
+  TABPAGE_REMOVE_RE.lastIndex = 0;
+  while ((match = TABPAGE_REMOVE_RE.exec(body)) !== null) {
+    removedTabs.add(match[2]);
+    hidden.add(match[2]);
+    shown.delete(match[2]);
+  }
+  return { hidden: [...hidden], shown: [...shown], removedTabs: [...removedTabs] };
 }
 
 function extractVisibilityGroups(source: string, sourceFile: string): RuntimeVisibilityGroup[] {
@@ -304,30 +414,44 @@ function extractVisibilityGroups(source: string, sourceFile: string): RuntimeVis
     if (!trueBody || trueBody.start !== cursor) continue;
     cursor = trueBody.end + 1;
     while (/\s/.test(source[cursor] || "")) cursor += 1;
-    if (!source.startsWith("else", cursor)) continue;
-    cursor += 4;
-    while (/\s/.test(source[cursor] || "")) cursor += 1;
-    // An `else if` is a separate state tree, not a two-way visibility switch.
-    if (source.startsWith("if", cursor) || source[cursor] !== "{") continue;
-    const falseBody = matchBody(source, cursor);
-    if (!falseBody || falseBody.start !== cursor) continue;
-
     const whenTrue = visibleAssignments(source.slice(trueBody.start + 1, trueBody.end));
-    const whenFalse = visibleAssignments(source.slice(falseBody.start + 1, falseBody.end));
+    let whenFalse: ReturnType<typeof visibleAssignments> = { hidden: [], shown: [], removedTabs: [] };
+    if (source.startsWith("else", cursor)) {
+      cursor += 4;
+      while (/\s/.test(source[cursor] || "")) cursor += 1;
+      // An `else if` is a separate state tree, not a two-way visibility switch.
+      if (source.startsWith("if", cursor) || source[cursor] !== "{") continue;
+      const falseBody = matchBody(source, cursor);
+      if (!falseBody || falseBody.start !== cursor) continue;
+      whenFalse = visibleAssignments(source.slice(falseBody.start + 1, falseBody.end));
+    } else if (whenTrue.removedTabs.length === 0) {
+      // One-sided Visible assignments are too ambiguous to pick as a preview
+      // state. TabPages.Remove is structurally unambiguous: the opposite branch
+      // retains the page already declared by the Designer.
+      continue;
+    }
     const trueHidden = whenTrue.hidden.filter((name) => !whenFalse.hidden.includes(name));
     const falseHidden = whenFalse.hidden.filter((name) => !whenTrue.hidden.includes(name));
-    if (trueHidden.length === 0 || falseHidden.length === 0) continue;
+    const removesTab = whenTrue.removedTabs.length > 0 || whenFalse.removedTabs.length > 0;
+    if (!removesTab && (trueHidden.length === 0 || falseHidden.length === 0)) continue;
+    if (trueHidden.length === 0 && falseHidden.length === 0) continue;
     const all = [...new Set([...trueHidden, ...falseHidden])].sort();
     const key = all.join("|");
     if (seen.has(key)) continue;
     seen.add(key);
     const condition = source.slice(openParen + 1, closeParen).replace(/\s+/g, " ").trim();
+    const trueShown = [...new Set([...whenTrue.shown, ...falseHidden])];
+    const falseShown = [...new Set([...whenFalse.shown, ...trueHidden])];
+    // A removed tab is an optional surface whose data/config prerequisite is
+    // unresolved during a UI-first migration. Prefer the source-proven minimal
+    // surface, but preserve both branches in neutral IR.
+    const defaultVariant = removesTab && trueHidden.length === 0 && falseHidden.length > 0 ? 1 : 0;
     groups.push({
       condition,
-      defaultVariant: 0,
+      defaultVariant,
       variants: [
-        { label: condition || "condition true", hiddenControls: trueHidden, shownControls: [...new Set([...whenTrue.shown, ...falseHidden])] },
-        { label: condition ? `not (${condition})` : "condition false", hiddenControls: falseHidden, shownControls: [...new Set([...whenFalse.shown, ...trueHidden])] },
+        { label: condition || "condition true", hiddenControls: trueHidden, shownControls: trueShown },
+        { label: condition ? `not (${condition})` : "condition false", hiddenControls: falseHidden, shownControls: falseShown },
       ],
       sourceFile,
       line: lineOf(source, match.index),
@@ -378,12 +502,157 @@ function extractCalledSymbols(body: string): string[] {
   let m: RegExpExecArray | null;
   CALL_RE.lastIndex = 0;
   while ((m = CALL_RE.exec(body)) !== null) {
-    const symbol = m[1];
+    const symbol = normalizeConditionalAccess(m[1]);
     const tail = symbol.split(".").pop() ?? symbol;
     if (CS_KEYWORDS.has(tail)) continue;
     symbols.add(symbol);
   }
   return [...symbols].sort();
+}
+
+function extractMethodEvidence(body: string): Pick<CodeMethodInfo, "propertyReads" | "assignedSymbols" | "constructedTypes" | "awaitedCalls"> {
+  return {
+    propertyReads: extractRegexSymbols(body, PROPERTY_READ_RE),
+    assignedSymbols: extractRegexSymbols(body, ASSIGNED_SYMBOL_RE),
+    constructedTypes: extractRegexSymbols(body, CONSTRUCTED_TYPE_RE),
+    awaitedCalls: extractRegexSymbols(body, AWAITED_CALL_RE),
+  };
+}
+
+function extractRegexSymbols(body: string, pattern: RegExp): string[] {
+  const values = new Set<string>();
+  pattern.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(body)) !== null) values.add(normalizeConditionalAccess(match[1]));
+  return [...values].sort();
+}
+
+function normalizeConditionalAccess(symbol: string): string {
+  return symbol.replaceAll("?.", ".");
+}
+
+function splitCodeArguments(source: string): string[] {
+  const output: string[] = [];
+  let depth = 0;
+  let start = 0;
+  let quote = "";
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    if (quote) {
+      if (char === "\\") index += 1;
+      else if (char === quote) quote = "";
+      continue;
+    }
+    if (char === '"' || char === "'") { quote = char; continue; }
+    if ("(<[".includes(char)) depth += 1;
+    else if (")>]".includes(char)) depth = Math.max(0, depth - 1);
+    else if (char === "," && depth === 0) { output.push(source.slice(start, index).trim()); start = index + 1; }
+  }
+  output.push(source.slice(start).trim());
+  return output.filter(Boolean);
+}
+
+function constructorArguments(expression: string, typeName: string): string[] | undefined {
+  const match = new RegExp(`\\bnew\\s+(?:[A-Za-z_]\\w*\\.)*${typeName}\\s*\\(`).exec(expression);
+  if (!match) return undefined;
+  const open = expression.indexOf("(", match.index);
+  let depth = 0;
+  let quote = "";
+  for (let index = open; index < expression.length; index += 1) {
+    const char = expression[index];
+    if (quote) {
+      if (char === "\\") index += 1;
+      else if (char === quote) quote = "";
+      continue;
+    }
+    if (char === '"' || char === "'") { quote = char; continue; }
+    if (char === "(") depth += 1;
+    else if (char === ")" && --depth === 0) return splitCodeArguments(expression.slice(open + 1, index));
+  }
+  return undefined;
+}
+
+function displayLiteral(expression: string, stringConstants: ReadonlyMap<string, string> = new Map()): string | undefined {
+  const literal = parseCodeLiteral(expression);
+  if (typeof literal === "string") return literal;
+  const strings = [...expression.matchAll(/"((?:\\.|[^"\\])*)"/g)];
+  if (strings.length > 0) return strings[strings.length - 1][1].replace(/\\"/g, '"');
+  const named = expression.match(/nameof\s*\(\s*([A-Za-z_]\w*)\s*\)/)?.[1];
+  if (named) return named;
+  const identifier = expression.trim().match(/^([A-Za-z_]\w*)$/)?.[1];
+  if (identifier && stringConstants.has(identifier)) return stringConstants.get(identifier);
+  const referencedConstant = [...expression.matchAll(/\b([A-Za-z_]\w*)\b/g)]
+    .map((match) => match[1]).reverse().find((name) => stringConstants.has(name));
+  return referencedConstant ? stringConstants.get(referencedConstant) : undefined;
+}
+
+function extractGridColumnHints(source: string): CodeBehindInfo["gridColumnHints"] {
+  const hints: CodeBehindInfo["gridColumnHints"] = [];
+  const variables = new Map<string, { headerText: string; width?: number }>();
+  const stringConstants = new Map([...source.matchAll(/\bconst\s+string\s+([A-Za-z_]\w*)\s*=\s*"((?:\\.|[^"\\])*)"\s*;/g)]
+    .map((match) => [match[1], match[2].replace(/\\"/g, '"')] as const));
+  const seen = new Set<string>();
+  for (const statementMatch of source.matchAll(/[^;]+;/g)) {
+    const statement = statementMatch[0];
+    const assignment = statement.match(/(?:GridColumn|var)?\s*([A-Za-z_]\w*)\s*=\s*(new\s+(?:[A-Za-z_]\w*\.)*GridColumn\s*\([\s\S]*)/);
+    if (assignment) {
+      const args = constructorArguments(assignment[2], "GridColumn");
+      const headerText = args?.[0] ? displayLiteral(args[0], stringConstants) : undefined;
+      if (headerText) {
+        const widthValue = args?.[1] ? parseCodeLiteral(args[1]) : undefined;
+        variables.set(assignment[1], { headerText, ...(typeof widthValue === "number" ? { width: widthValue } : {}) });
+      }
+    }
+    const add = statement.match(/(?:this\.)?([A-Za-z_]\w*)\s*\.\s*Columns\s*\.\s*Add\s*\(([\s\S]*)\)\s*;/);
+    if (!add) continue;
+    const inlineArgs = constructorArguments(add[2], "GridColumn");
+    const inlineHeader = inlineArgs?.[0] ? displayLiteral(inlineArgs[0], stringConstants) : undefined;
+    const inlineWidth = inlineArgs?.[1] ? parseCodeLiteral(inlineArgs[1]) : undefined;
+    const variable = add[2].trim().match(/^([A-Za-z_]\w*)$/)?.[1];
+    const value = inlineHeader
+      ? { headerText: inlineHeader, ...(typeof inlineWidth === "number" ? { width: inlineWidth } : {}) }
+      : variable ? variables.get(variable) : undefined;
+    if (!value) continue;
+    const key = `${add[1]}|${value.headerText}|${value.width ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    hints.push({ controlName: add[1], column: {
+      name: `${add[1]}RuntimeColumn${hints.filter((hint) => hint.controlName === add[1]).length + 1}`,
+      headerText: value.headerText,
+      ...(value.width !== undefined ? { width: value.width } : {}),
+      kind: "GridColumn",
+    } });
+  }
+  return hints;
+}
+
+function extractMenuItemHints(source: string): CodeBehindInfo["menuItemHints"] {
+  const hints: CodeBehindInfo["menuItemHints"] = [];
+  const variables = new Map<string, { text: string; handler?: string }>();
+  const seen = new Set<string>();
+  for (const statementMatch of source.matchAll(/[^;]+;/g)) {
+    const statement = statementMatch[0];
+    const assignment = statement.match(/(?:MenuItemOD|var)?\s*([A-Za-z_]\w*)\s*=\s*(new\s+(?:[A-Za-z_]\w*\.)*MenuItemOD\s*\([\s\S]*)/);
+    if (assignment) {
+      const args = constructorArguments(assignment[2], "MenuItemOD");
+      const text = args?.[0] ? displayLiteral(args[0]) : undefined;
+      if (text) variables.set(assignment[1], { text, ...(args?.[1]?.match(/^([A-Za-z_]\w*)$/)?.[1] ? { handler: args[1].trim() } : {}) });
+    }
+    const add = statement.match(/(?:this\.)?([A-Za-z_]\w*)\s*\.\s*Add\s*\(([\s\S]*)\)\s*;/);
+    if (!add) continue;
+    const inlineArgs = constructorArguments(add[2], "MenuItemOD");
+    const inlineText = inlineArgs?.[0] ? displayLiteral(inlineArgs[0]) : undefined;
+    const variable = add[2].trim().match(/^([A-Za-z_]\w*)$/)?.[1];
+    const value = inlineText
+      ? { text: inlineText, ...(inlineArgs?.[1]?.match(/^([A-Za-z_]\w*)$/)?.[1] ? { handler: inlineArgs[1].trim() } : {}) }
+      : variable ? variables.get(variable) : undefined;
+    if (!value) continue;
+    const key = `${add[1]}|${value.text}|${value.handler ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    hints.push({ controlName: add[1], ...value });
+  }
+  return hints;
 }
 
 function enclosingHandler(handlers: MigrationHint[], line: number): string | undefined {
@@ -396,6 +665,7 @@ function enclosingHandler(handlers: MigrationHint[], line: number): string | und
 export function parseCodeBehind(source: string, sourcePath: string): CodeBehindInfo {
   const clean = stripComments(source);
   const file = basename(sourcePath);
+  const typeSpans = codeTypeSpans(clean);
 
   const methods: CodeMethodInfo[] = [];
   let methodMatch: RegExpExecArray | null;
@@ -403,12 +673,16 @@ export function parseCodeBehind(source: string, sourcePath: string): CodeBehindI
   while ((methodMatch = METHOD_DECL_RE.exec(clean)) !== null) {
     const body = matchBody(clean, methodMatch.index);
     if (!body) continue;
+    const bodySource = clean.slice(body.start, body.end + 1);
     methods.push({
+      ownerType: ownerTypeAt(typeSpans, body.start),
       name: methodMatch[1],
       sourceFile: file,
       lineStart: lineOf(clean, methodMatch.index),
       lineEnd: lineOf(clean, body.end),
-      calledSymbols: extractCalledSymbols(clean.slice(body.start, body.end + 1)),
+      calledSymbols: extractCalledSymbols(bodySource),
+      ...extractMethodEvidence(bodySource),
+      valueWrites: [],
       bodyStart: body.start,
       bodyEnd: body.end,
     });
@@ -423,12 +697,16 @@ export function parseCodeBehind(source: string, sourcePath: string): CodeBehindI
       if (methods.some((method) => method.name === className && method.lineStart === lineStart)) continue;
       const body = matchBody(clean, constructor.index);
       if (!body) continue;
+      const bodySource = clean.slice(body.start, body.end + 1);
       methods.push({
+        ownerType: ownerTypeAt(typeSpans, body.start) ?? className,
         name: className,
         sourceFile: file,
         lineStart,
         lineEnd: lineOf(clean, body.end),
-        calledSymbols: extractCalledSymbols(clean.slice(body.start, body.end + 1)),
+        calledSymbols: extractCalledSymbols(bodySource),
+        ...extractMethodEvidence(bodySource),
+        valueWrites: [],
         bodyStart: body.start,
         bodyEnd: body.end,
       });
@@ -436,6 +714,7 @@ export function parseCodeBehind(source: string, sourcePath: string): CodeBehindI
     }
   }
   methods.sort((a, b) => a.lineStart - b.lineStart);
+  const fields = extractDeclaredFields(clean, file, typeSpans, methods);
 
   const handlers: MigrationHint[] = [];
   let m: RegExpExecArray | null;
@@ -444,12 +723,14 @@ export function parseCodeBehind(source: string, sourcePath: string): CodeBehindI
     const name = m[1];
     const body = matchBody(clean, m.index);
     if (!body) continue;
+    const bodySource = clean.slice(body.start, body.end + 1);
     handlers.push({
       handler: name,
       sourceFile: file,
       lineStart: lineOf(clean, m.index),
       lineEnd: lineOf(clean, body.end),
-      calledSymbols: extractCalledSymbols(clean.slice(body.start, body.end + 1)),
+      calledSymbols: extractCalledSymbols(bodySource),
+      ...extractMethodEvidence(bodySource),
     });
   }
 
@@ -634,10 +915,11 @@ export function parseCodeBehind(source: string, sourcePath: string): CodeBehindI
       PlaceholderText: "placeholderText",
       WatermarkText: "placeholderText",
       CueBannerText: "placeholderText",
+      ToolTipText: "toolTipText",
       SelectedIndex: "selectedIndex",
       SelectedItem: "selectedItem",
       Value: "value",
-    } as const)[m[2] as "Text" | "Checked" | "Enabled" | "ReadOnly" | "PlaceholderText" | "WatermarkText" | "CueBannerText" | "SelectedIndex" | "SelectedItem" | "Value"];
+    } as const)[m[2] as "Text" | "Checked" | "Enabled" | "ReadOnly" | "PlaceholderText" | "WatermarkText" | "CueBannerText" | "ToolTipText" | "SelectedIndex" | "SelectedItem" | "Value"];
     valueHints.push({
       controlName: m[1],
       source: {
@@ -652,6 +934,30 @@ export function parseCodeBehind(source: string, sourcePath: string): CodeBehindI
         ...(literalValue !== undefined ? { literalValue } : {}),
       },
     });
+  }
+
+  for (const method of methods) {
+    method.valueWrites = valueHints
+      .filter((hint) => hint.source.methodName === method.name)
+      .map((hint) => ({
+        controlName: hint.controlName,
+        property: hint.source.property,
+        expression: hint.source.expression,
+        ...(hint.source.conditional ? { conditional: true } : {}),
+        ...(hint.source.literalValue !== undefined ? { literalValue: hint.source.literalValue } : {}),
+      }));
+  }
+  for (const handler of handlers) {
+    const writes = valueHints
+      .filter((hint) => hint.source.methodName === handler.handler)
+      .map((hint) => ({
+        controlName: hint.controlName,
+        property: hint.source.property,
+        expression: hint.source.expression,
+        ...(hint.source.conditional ? { conditional: true } : {}),
+        ...(hint.source.literalValue !== undefined ? { literalValue: hint.source.literalValue } : {}),
+      }));
+    if (writes.length > 0) handler.valueWrites = writes;
   }
 
   WATERMARK_CALL_RE.lastIndex = 0;
@@ -680,6 +986,34 @@ export function parseCodeBehind(source: string, sourcePath: string): CodeBehindI
         ...(literalValue !== undefined ? { literalValue } : {}),
       },
     });
+  }
+
+  TOOLTIP_CALL_RE.lastIndex = 0;
+  while ((m = TOOLTIP_CALL_RE.exec(clean)) !== null) {
+    const line = lineOf(clean, m.index);
+    const method = methodAt(methods, line);
+    if (!method) continue;
+    const openParen = clean.indexOf("(", m.index + m[0].length - 1);
+    const closeParen = matchingDelimiter(clean, openParen, "(", ")");
+    if (openParen < 0 || closeParen < 0) continue;
+    const args = callArguments(clean, openParen, closeParen);
+    const target = args[0]?.match(new RegExp(`^(?:this\\.)?(${IDENT})$`))?.[1];
+    const expression = args[1]?.trim();
+    if (!target || !expression) continue;
+    const literalValue = parseCodeLiteral(expression);
+    valueHints.push({
+      controlName: target,
+      source: {
+        property: "toolTipText",
+        expression,
+        sourceFile: file,
+        line,
+        methodName: method.name,
+        ...(isConditionalAssignment(clean, method, m.index) ? { conditional: true } : {}),
+        ...(literalValue !== undefined ? { literalValue } : {}),
+      },
+    });
+    TOOLTIP_CALL_RE.lastIndex = closeParen + 1;
   }
 
   const tabNavigators: RuntimeTabNavigator[] = [];
@@ -835,8 +1169,10 @@ export function parseCodeBehind(source: string, sourcePath: string): CodeBehindI
 
   const visibilityGroups = extractVisibilityGroups(clean, file);
   const controlBindings = extractControlBindings(clean, file, methods, handlers);
+  const gridColumnHints = extractGridColumnHints(clean);
+  const menuItemHints = extractMenuItemHints(clean);
 
-  return { methods, handlers, navigations, bindings, layoutHints, visibilityGroups, controlBindings, tabNavigators, itemHints, appearanceHints, propertyGridHints, valueHints };
+  return { fields, methods, handlers, navigations, bindings, layoutHints, visibilityGroups, controlBindings, tabNavigators, itemHints, appearanceHints, propertyGridHints, valueHints, gridColumnHints, menuItemHints };
 }
 
 // Walk the form's control tree, attach migration hints to matching events,
